@@ -47,7 +47,7 @@ def convert( args ):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-            description = "Convert a multi-entry fasta file into a format recognized by the Tensorflow translation program",
+            description = "Convert a multi-entry fasta file into a format recognized by the Tensorflow translation program"
             )
     parser.add_argument( 'word_size',
             type = int,
