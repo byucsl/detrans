@@ -5,7 +5,7 @@ written by stanley fujimoto (masakistan)
 27 feb 2016
 '''
 
-import sys, argparse
+import sys, argparse, time
 from Bio import Entrez
 
 def read_accessions( file_path ):
@@ -31,11 +31,17 @@ def make_queries( output_dir, email, ids ):
     for id in ids:
         sys.stderr.write( "\tQuerying " + id + "..." )
         
+        start = time.time()
+
         fasta_cds = request_cds( id, email )
         path_cds = output_dir + "/" + id + ".cds.fasta"
         write( path_cds, fasta_cds )
+
+        end = time.time()
+
+        elapsed_time = end - start
         
-        sys.stderr.write( "Done!\n" )
+        sys.stderr.write( "Done! (" + str( elapsed_time ) + " secs)\n" )
 
 def main( args ):
     sys.stderr.write( "Reading IDs from: " + args.input_list + "\n" )
