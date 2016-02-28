@@ -31,9 +31,9 @@ print( "Longest length:\t" + str( longest ) )
 print( "Shortest length:\t" + str( shortest ) )
 print( "Average length:\t" + str( float( cur_sum ) / count ) )
 
-print( "longest:" )
+'''print( "longest:" )
 print( longest_seq )
 print( "*************")
 print( "shortest:" )
-print( shortest_seq )
+print( shortest_seq )'''
 
