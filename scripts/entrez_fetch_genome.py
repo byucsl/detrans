@@ -1,8 +1,8 @@
 '''
-This script is designed to take a list of NC_ IDs from NCBI and download the coding sequence for them from NCBI via entrez.
+This script is designed to take a list of NC_ IDs from NCBI and download the genome for them from NCBI via entrez.
 
 written by stanley fujimoto (masakistan)
-27 feb 2016
+28 feb 2016
 '''
 
 import sys, argparse, time, os.path
@@ -19,7 +19,7 @@ def read_accessions( file_path ):
 
 def request_cds( org_id, email ):
     Entrez.email = email
-    handle = Entrez.efetch(db="nuccore", id=org_id, rettype="fasta_cds_na", retmode="text")
+    handle = Entrez.efetch(db="nuccore", id=org_id, rettype="fasta", retmode="text")
     text = handle.read()
     return text
 
@@ -35,7 +35,7 @@ def make_queries( output_dir, email, ids, retry ):
         sys.stderr.write( "\tQuerying " + id + " ... " )
         
         
-        path_cds = output_dir + "/" + id + ".cds.fasta"
+        path_cds = output_dir + "/" + id + ".fasta"
         start = time.time()
         if retry:
             if not os.path.isfile( path_cds ):
@@ -69,7 +69,7 @@ def main( args ):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-            description = "Utilize entrez to download coding sequences from NCBI"
+            description = "Utilize entrez to download genomes from NCBI"
             )
     parser.add_argument( 'input_list',
             type = str,
