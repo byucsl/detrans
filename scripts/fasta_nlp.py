@@ -7,7 +7,16 @@ written by stanley fujimoto (masakistan)
 
 import sys, argparse
 
-def parse_and_print( input_file, output_file ):
+
+def split_string_into_words( seq, word_size, overlap ):
+    if overlap:
+        text = " ".join( [ seq[ i : i + word_size ] for i in range( 0, len( seq ) - word_size + 1 ) ] )
+    else:
+        text = " ".join( [ seq[ i : i + word_size ] for i in range( 0, len( seq ), word_size ) ] )
+    return text
+
+
+def parse_and_print( input_file, output_file, word_size, overlap ):
     counter = 0
     with open( output_file, 'w' ) as fh_out:
         with open( input_file, 'r' ) as fh_in:
@@ -15,14 +24,17 @@ def parse_and_print( input_file, output_file ):
             for line in fh_in:
                 if line[ 0 ] == '>':
                     if seq != "":
-                        fh_out.write( seq + "\n" )
+                        formatted_str = split_string_into_words( seq, word_size, overlap )
+                        fh_out.write( formatted_str + "\n" )
                         counter += 1
                         seq = ""
                 else:
                     seq += line.strip()
-            fh_out.write( seq )
-            counter += 1
-    sys.stderr.write( "Read/Wrote " + str( counter ) + " seqs.\n" )
+            formatted_str = split_string_into_words( seq, word_size, overlap )
+            fh_out.write( formatted_str )
+            if len( formatted_str ) > 0:
+                counter += 1
+    sys.stderr.write( "\tRead/Wrote " + str( counter ) + " seqs.\n" )
         
 
 def main( args ):
@@ -34,9 +46,10 @@ def main( args ):
         output_path = args.input_file + ".no_headers.txt"
         sys.stderr.write( "Writing to: " + output_path + "\n" )
 
-    parse_and_print( args.input_file, output_path )
+    parse_and_print( args.input_file, output_path, args.word_size, args.overlap )
 
     sys.stderr.write( "Finished!\n" )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -50,6 +63,14 @@ if __name__ == "__main__":
             type = str,
             help = "Output file path. If not provided, input file name will be used as prefix with \'.no_headers.txt\' extension added."
             )
+    parser.add_argument( '--word_size',
+            type = int,
+            help = "The size of the words to separate the sequences into. 1 for amino acids, 3 for codons. etc. (Default 3)."
+            )
+    parser.add_argument( '--overlap',
+            action = 'store_true',
+            help = "Set this to allow words to overlap. Used for generating kmers as words." )
+    parser.set_defaults( word_size = 3, overlap = False )
 
     args = parser.parse_args()
 
