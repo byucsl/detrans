@@ -1,1 +1,3 @@
 data/e_coli
+networks/*.json
+networks/*.h5

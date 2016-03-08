@@ -38,6 +38,7 @@ raw_text = open( sys.argv[ 1 ] ).read().strip()
 aas_set = set( raw_text.split() )
 len_aas = len( aas_set ) + 1
 aa_indices = dict( ( c, i + 1 ) for i, c in enumerate( aas_set ) )
+aa_indices[ "" ] = 0
 
 #print "number of amino acids:\t", str( len_aas )
 #print aas_set
@@ -78,6 +79,7 @@ raw_text = open( sys.argv[ 2 ] ).read().strip()
 cds_set = set( raw_text.split() )
 len_codons = len( cds_set ) + 1
 codon_indices = dict( ( c, i + 1 ) for i, c in enumerate( cds_set ) )
+codon_indices[ "" ] = 0
 idx_to_codon = {v: k for k, v in codon_indices.items()}
 
 #for key, val in codon_indices.iteritems():
@@ -162,8 +164,10 @@ for result in results:
         codon_idx = np.argmax( pos )
         codon_prob = np.amax( pos )
         codon = idx_to_codon[ codon_idx ]
-        print( codon + "\t" + str( codon_idx ) + "\t" + str( codon_prob ) )
+        #print( codon + "\t" + str( codon_idx ) + "\t" + str( codon_prob ) )
+        generated_seq += " "
         generated_seq += codon
+    generated_seq = generated_seq.strip()
     print( generated_seq )
 
 
