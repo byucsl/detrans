@@ -126,11 +126,13 @@ sys.stderr.write( "Creating train, validation and test sets\n" )
 sys.stderr.write( "\tCreating train..." )
 #train_x = np.zeros((len(aas), maxlen, len(chars)), dtype=np.bool)
 #train_y = X = np.zeros((len(sentences), maxlen, len(chars)), dtype=np.bool)
-train_x = aas_p
+train_x = np.array( aas_p )
 train_y = cds_p
 hidden_units = 10
 nb_classes = 10
 
+print( train_x.shape )
+print( train_y.shape )
 
 print('Build model...')
 model = Sequential()

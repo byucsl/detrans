@@ -13,7 +13,7 @@ modified by stanley fujimoto (masakistan)
 
 import sys, argparse, time, re
 import numpy as np
-from keras.models import Sequential
+from keras.models import Sequential, Graph
 from keras.layers.core import Merge, Activation, TimeDistributedDense
 from keras.layers.recurrent import LSTM
 from keras.optimizers import SGD
@@ -52,7 +52,7 @@ def seq_to_indices( seq, index ):
 
 
 def seqs_to_indices( seqs, index ):
-    return [ seq_to_indices( x, index ) for x in seqs ]
+    return np.array( [ seq_to_indices( x, index ) for x in seqs ] )
 
 
 def seqs_to_one_hot( maxlen, seqs, index ):
@@ -86,6 +86,8 @@ def load_data( amino_acid_path, codons_path ):
     return aa_index, aa_seqs, cds_index, cds_seqs
 
 
+# Take the totality of all the data and then split it into train, test, and
+# validation datasets. All returned as numpy arrays.
 def split_train_test_validate( split_vals, aa_seqs, cds_seqs ):
     errw( "\nSplitting Data into train, test, validate (" + split_vals +")\n" )
     errw( "\tSplitting..." )
@@ -107,84 +109,170 @@ def split_train_test_validate( split_vals, aa_seqs, cds_seqs ):
     validate_x = aa_seqs[ train_nb : train_nb + test_nb ]
     validate_y = cds_seqs[ train_nb : train_nb + test_nb ]
     test_x = aa_seqs[ train_nb + test_nb : ]
-    test_y = aa_seqs[ train_nb + test_nb : ]
+    test_y = cds_seqs[ train_nb + test_nb : ]
 
     errw( "Done!\n" )
 
     return  train_x, train_y, test_x, test_y, validate_x, validate_y
 
 
-def fork( model, nb_layers ):
-    fork = []
-    for i in range( nb_layers ):
-        f = Sequential()
-        f.add( model )
-        forks.append( f )
-    return forks
-
-
-def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cds_vocab_size, maxlen ):
+# Build the deep BLSTM
+# we're going to do this using a graph structure instead of sequential
+# because it's easier to think about and do, sequential is weird :(
+def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cds_vocab_size, maxlen, forwards_only ):
     errw( "Building model" )
     
-    # create the forwards and backwards networks
-    # add lstm layers in for loop
-   
-    errw( "\tBuiling embedding layer..." )
-    # forwards embedding layer
-    forwards = Sequential()
-    forwards.add( Embedding( aa_vocab_size, nb_embedding_nodes, masking_zero = True ) )
+    model = Graph()
 
-    # backwards embedding layer
-    backwards = Sequential()
-    backwards.add( Embedding( max_features, hidden_units, input_length = maxlen ) )
+    errw( "\tAdding initial input layer..." )
+    model.add_input(
+            name = "input",
+            input_shape = ( maxlen, ),
+            dtype = int
+            )
+    errw( "Done!\n" )
+
+    errw( "\tAdding embedding layer..." )
+    model.add_node( 
+            Embedding( 
+                aa_vocab_size,
+                nb_embedding_nodes,
+                mask_zero = True
+                ), 
+            name = "embedding",
+            input = "input"
+            )
     errw( "Done!\n" )
 
     # for each lstm layer add a layer to the model
+    prev_forwards_input = "embedding"
+    prev_backwards_input = "embedding"
     for i in range( nb_layers ):
-        errw( "\tCreating layer " + str( i + 1 ) + "\n" )
-        errw( "\t\tForwards network built..." )
-        forwards.add( LSTM( nb_lstm_nodes, return_sequences = True ) )
-        #left.add( LSTM( output_dim = hidden_units, init = 'uniform', inner_init = 'uniform',
-        #               forget_bias_init = 'one', return_sequences = True, activation = 'tanh',
-        #               inner_activation = 'sigmoid', input_shape = ( maxlen, len_aas ) ) )
+
+        # set up the correct input names for each layer
+        # if we're on the first iteration, the embedding layer is the
+        # input layer
+        # if we're past the first iteration it is previous lstm layer
+        # that is the input layer
+        if i > 0:
+            prev_forwards_input = "forwards" + str( i - 1 )
+            prev_backwards_input = "backwards" + str( i - 1 )
+
+        errw( "\tCreating LSTM layer " + str( i + 1 ) + "\n" )
+        errw( "\t\tAdding forwards layer built..." )
+
+        model.add_node(
+                LSTM(
+                    nb_lstm_nodes,
+                    return_sequences = True
+                    ),
+                name = "forwards" + str( i ),
+                input = prev_forwards_input
+                )
         errw( "Done!\n" )
         
-        errw( "\t\tBackwards network built..." )
-        backwards.add( LSTM( nb_lstm_nodes, return_sequences = True, go_backwards = True ) )
-        #right.add( LSTM( output_dim = hidden_units, init = 'uniform', inner_init = 'uniform',
-        #               forget_bias_init = 'one', return_sequences = True, activation = 'tanh',
-        #               inner_activation = 'sigmoid', input_shape = ( maxlen, len_aas ),
-        #               go_backwards = True ) )
-        errw( "Done!\n" )
+        # if we're not doing a bidirectional lstm
+        if not forwards_only:
+            errw( "\t\tAdding backwards layer..." )
+            model.add_node(
+                    LSTM(
+                        nb_lstm_nodes,
+                        return_sequences = True
+                        ),
+                    name = "backwards" + str( i ),
+                    input = prev_backwards_input
+                    )
+            errw( "Done!\n" )
 
-    errw( "\tMerging forwards and backwards..." )
-    model = Sequential()
-    model.add( Merge( [ forwards, backwards ], mode = 'sum' ) )
+    last_inputs = [ "forwards" + str( i ) ]
+    if not forwards_only:
+        last_inputs.append( "backwards" + str( i ) )
+
+    errw( "\tAdding dense layer on top of LSTM layers..." )
+    model.add_node(
+            TimeDistributedDense(
+                cds_vocab_size
+                ),
+            name = "timedistributeddense",
+            inputs = last_inputs
+            )
     errw( "Done!\n" )
 
-    #model.add(TimeDistributedDense(nb_classes))
-    #print( "Dense added..." )
+    errw( "\tAdding softmax layer..." )
+    model.add_node(
+            Activation(
+                "softmax"
+                ),
+            name = "activation",
+            input = "timedistributeddense"
+            )
+    errw( "Done!\n" )
 
-    #model.add(Activation('softmax'))
-    #print( "Activation added..." )
+    errw( "\tAdding final output node to graph..." )
+    model.add_output(
+            name = "output",
+            input = "activation"
+            )
+    errw( "Done!\n" )
 
-    #sgd = SGD(lr=0.1, decay=1e-5, momentum=0.9, nesterov=True)
-    #print( "Loss function defined..." )
-
-    #model.compile(loss='categorical_crossentropy', optimizer=sgd)
-    #print( "Model compiled..." )
+    errw( "\tCompile constructed model..." )
+    #model.compile( loss = 'categorical_crossentropy', optimizer = 'rmsprop' )
+    model.compile(
+            loss = { "output" : "categorical_crossentropy" },
+            optimizer = "rmsprop"
+            )
+    errw( "Done!\n" )
 
     return model
 
 
-def train( model ):
+# Take the constructed model and train it using the data provided
+def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix ):
     # train the model
-    print("Train...")
+    errw("Training...\n")
 
-    for i in range( nb_epoches ):
-        model.fit( train_x, train_y, batch_size=1, nb_epoch=1, validation_data=(train_x, train_y), verbose=1, show_accuracy=True)
+    for i in range( nb_epochs ):
+        model.fit(
+                {
+                    "input" : train_x,
+                    "output" : train_y,
+                },
+                nb_epoch = nb_epochs,
+                batch_size = 1,
+                verbose = verbosity,
+                shuffle = False,
+                validation_data = {
+                    "input" : validate_x,
+                    "output" : validate_y
+                    }
+                )
+
+        # save the model and its weights
+        errw( "\tSaving model..." )
+        json_string = model.to_json()
+        open( model_save_prefix + ".json", 'w' ).write( json_string )
+        model.save_weights( model_save_prefix + ".h5", overwrite = True )
+        errw( "Done!\n" )
 
 
+# TODO: implement
+# Take a trained model and print out the accuracy on the test set
+def test_model( model, test_x, test_y ):
+    # TODO: figure out how to show accuracy
+    # this method doesn't seem to exist for graph models, it does for
+    # sequential models though... which is odd
+    pass
+
+
+# TODO: implement
+# Classify a given file, output is written to a file with the same name
+# as the file_path + '.results' extension added. The output will be in
+# fasta format
+def classify( model, file_path ):
+    pass
+
+
+# Shorthand way to print to standard error
 def errw( string ):
     sys.stderr.write( string )
 
@@ -200,8 +288,13 @@ def main( args ):
     errw( "\tLSTM output nodes: " + str( args.lstm_nodes ) + "\n" )
     errw( "\tModel save path prefix: " + args.model_save_path + "\n" )
     errw( "\tData splits: " + args.training_split + "\n" )
+    errw( "\tModel training verbosity level: " + str( args.verbosity ) + "\n" )
+    
     if args.classify:
         errw( "\tClassifying: " + args.clasify + "\n" )
+    
+    if args.forwards_only:
+        errw( "\tForwards only network (not bidirectional)\n" )
 
     # load data
     aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path )
@@ -236,7 +329,18 @@ def main( args ):
     errw( "\tValidate instances: " + str( len( validate_x ) ) + "\n" )
 
     # build model
-    model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len )
+    model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only )
+
+    # train the model
+    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path )
+
+    # run model on test dataset and print accuracy
+    test_model( model, test_x, test_y )
+
+    # check if we need to classify another external file
+    # classify if we need to and output the results to a file
+    if args.classify:
+        classify( model, args.classify )
 
     errw( "Done!\n" )
     
@@ -278,7 +382,16 @@ if __name__ == "__main__":
             help = "Number of hidden nodes in each layer (Default 128)."
             )
     parser.add_argument( '--training_split',
+            type = str,
             help = "A comma separated list of 3 values that denote how to split the input data between training, validation, and testing in that respective order (Default 70,15,15)."
+            )
+    parser.add_argument( '--forwards_only',
+            type = bool,
+            help = "Use only forwards LSTMs (Default False)."
+            )
+    parser.add_argument( '--verbosity',
+            type = int,
+            help = "Verbosity level when training the network (Default 1)."
             )
     default_model_save_path = "detrans_model." + time.strftime( "%Y-%m-%d" ) + "-" + time.strftime( "%H-%M-%S" )
     parser.set_defaults(
@@ -287,7 +400,9 @@ if __name__ == "__main__":
             lstm_nodes = 128,
             model_save_path = default_model_save_path,
             epochs = 5,
-            training_split = "70,15,15"
+            training_split = "70,15,15",
+            forwards_only = False,
+            verbosity = 1
             )
 
     args = parser.parse_args()
