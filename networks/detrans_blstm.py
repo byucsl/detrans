@@ -40,7 +40,7 @@ def word_to_number( word_set ):
 
 
 def number_to_word( index ):
-    return { v : k for k, v in codon_index.items() }
+    return { v : k for k, v in index.items() }
 
 
 def parse_seqs( raw_text ):
@@ -228,19 +228,24 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
 
 # Take the constructed model and train it using the data provided
 def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix ):
+    # TODO: comment this out
+    #validate_x = train_x
+    #validate_y = train_y
+
     # train the model
     errw("Training...\n")
 
     for i in range( nb_epochs ):
+        errw( "\tTraining epoch: " + str( i ) + "\n" )
         model.fit(
                 {
                     "input" : train_x,
                     "output" : train_y,
                 },
-                nb_epoch = nb_epochs,
+                nb_epoch = 1,
                 batch_size = 1,
                 verbose = verbosity,
-                shuffle = False,
+                #shuffle = False,
                 validation_data = {
                     "input" : validate_x,
                     "output" : validate_y
@@ -248,20 +253,60 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
                 )
 
         # save the model and its weights
-        errw( "\tSaving model..." )
+        errw( "\t\tSaving model..." )
         json_string = model.to_json()
         open( model_save_prefix + ".json", 'w' ).write( json_string )
         model.save_weights( model_save_prefix + ".h5", overwrite = True )
         errw( "Done!\n" )
 
 
-# TODO: implement
 # Take a trained model and print out the accuracy on the test set
-def test_model( model, test_x, test_y ):
-    # TODO: figure out how to show accuracy
+def test_model( model, idx_to_codon, test_x, test_y ):
+    # show accuracy
     # this method doesn't seem to exist for graph models, it does for
     # sequential models though... which is odd
-    pass
+    errw( "Testing model\n" )
+   
+    errw( "\tClassifying test data set..." )
+    # generate predictions
+    results = model.predict(
+            {
+                "input" : test_x,
+                "output" : test_y
+            },
+            verbose = 1
+            )
+    errw( "Done!\n" )
+
+    errw( "\tComputing accuracy..." )
+    correct = 0.
+    incorrect = 0.
+    outputs = results[ "output" ]
+    
+    for predicted, actual in zip( outputs, test_y ):
+        gen_seq = ""
+        cor_seq = ""
+        for idx, pred in enumerate( predicted ):
+            codon_idx = np.argmax( pred )
+            codon_prob = np.amax( pred )
+            codon = idx_to_codon[ codon_idx ]
+
+            cor_codon_idx = np.argmax( actual[ idx ] )
+            cor_codon = idx_to_codon[ cor_codon_idx ]
+
+            gen_seq += codon
+            cor_seq += cor_codon
+            #errw( codon + "\t" + cor_codon + "\n" )
+            if cor_codon == "":
+                continue
+            if cor_codon == codon:
+                correct += 1.
+            else:
+                incorrect += 1.
+        #errw( gen_seq + "\n" )
+        #errw( cor_seq + "\n" )
+    errw( "Done!\n" )
+    errw( "\tTest set accuracy: " + str( correct / ( incorrect + correct ) ) + "\n" )
 
 
 # TODO: implement
@@ -299,6 +344,8 @@ def main( args ):
     # load data
     aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path )
 
+    cds_reverse_index = number_to_word( cds_index )
+
     # prepare needed parameters for model training
     aa_vocab_size = len( aa_index )
     cds_vocab_size = len( cds_index )
@@ -335,7 +382,10 @@ def main( args ):
     train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path )
 
     # run model on test dataset and print accuracy
-    test_model( model, test_x, test_y )
+    # TODO: comment this out
+    #test_x = train_x
+    #test_y = train_y
+    test_model( model, cds_reverse_index, test_x, test_y )
 
     # check if we need to classify another external file
     # classify if we need to and output the results to a file
@@ -391,7 +441,7 @@ if __name__ == "__main__":
             )
     parser.add_argument( '--verbosity',
             type = int,
-            help = "Verbosity level when training the network (Default 1)."
+            help = "Verbosity level when training the network (Default 0)."
             )
     default_model_save_path = "detrans_model." + time.strftime( "%Y-%m-%d" ) + "-" + time.strftime( "%H-%M-%S" )
     parser.set_defaults(
@@ -402,7 +452,7 @@ if __name__ == "__main__":
             epochs = 5,
             training_split = "70,15,15",
             forwards_only = False,
-            verbosity = 1
+            verbosity = 0
             )
 
     args = parser.parse_args()
