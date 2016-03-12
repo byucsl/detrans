@@ -43,8 +43,8 @@ def number_to_word( index ):
     return { v : k for k, v in index.items() }
 
 
-def parse_seqs( raw_text ):
-    return [ x.strip() for x in raw_text.split( '\n' ) ]
+def parse_seqs( raw_text, seq_len_cutoff ):
+    return [ x.strip() for x in raw_text.split( '\n' ) if len( x ) <= seq_len_cutoff or seq_len_cutoff == 0 ]
 
 
 def seq_to_indices( seq, index ):
@@ -66,21 +66,21 @@ def seqs_to_one_hot( maxlen, seqs, index ):
     return encodings
 
 
-def load_data( amino_acid_path, codons_path ):
+def load_data( amino_acid_path, codons_path, seq_len_cutoff ):
     sys.stderr.write( "\nLoading data\n" )
     
     sys.stderr.write( "\tLoading amino acid file..." )
     aa_raw_text = read_raw_text( amino_acid_path )
     amino_acids_vocab = unique_words( aa_raw_text )
     aa_index = word_to_number( amino_acids_vocab )
-    aa_seqs = parse_seqs( aa_raw_text )
+    aa_seqs = parse_seqs( aa_raw_text, seq_len_cutoff )
     sys.stderr.write( "Done!\n" )
 
     sys.stderr.write( "\tLoading codon file..." )
     cds_raw_text = read_raw_text( codons_path )
     codons_vocab = unique_words( cds_raw_text )
     cds_index = word_to_number( codons_vocab )
-    cds_seqs = parse_seqs( cds_raw_text )
+    cds_seqs = parse_seqs( cds_raw_text, seq_len_cutoff )
     sys.stderr.write( "Done!\n" )
 
     return aa_index, aa_seqs, cds_index, cds_seqs
@@ -114,6 +114,12 @@ def split_train_test_validate( split_vals, aa_seqs, cds_seqs ):
     errw( "Done!\n" )
 
     return  train_x, train_y, test_x, test_y, validate_x, validate_y
+
+
+# TODO: implment
+# load a model from disk
+def load_model( model_path ):
+    pass
 
 
 # Build the deep BLSTM
@@ -335,14 +341,23 @@ def main( args ):
     errw( "\tData splits: " + args.training_split + "\n" )
     errw( "\tModel training verbosity level: " + str( args.verbosity ) + "\n" )
     
+    errw( "\tMaximum sequence length for training: " )
+    if args.seq_len_cutoff == 0:
+        errw( "Full length sequences\n" )
+    else:
+        errw( str( args.seq_len_cutoff ) + "\n" )
+    
     if args.classify:
         errw( "\tClassifying: " + args.clasify + "\n" )
     
     if args.forwards_only:
         errw( "\tForwards only network (not bidirectional)\n" )
 
+    if args.load_model:
+        errw( "\tLoading model from: " + args.load_model + "\n" )
+
     # load data
-    aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path )
+    aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
 
     cds_reverse_index = number_to_word( cds_index )
 
@@ -375,8 +390,11 @@ def main( args ):
     errw( "\tTest instances:     " + str( len( test_x ) )  + "\n" )
     errw( "\tValidate instances: " + str( len( validate_x ) ) + "\n" )
 
-    # build model
-    model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only )
+    # build or load the model
+    if args.load_model:
+        model = load_model( args.load_model )
+    else:
+        model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only )
 
     # train the model
     train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path )
@@ -444,6 +462,14 @@ if __name__ == "__main__":
             help = "Verbosity level when training the network (Default 0)."
             )
     default_model_save_path = "detrans_model." + time.strftime( "%Y-%m-%d" ) + "-" + time.strftime( "%H-%M-%S" )
+    parser.add_argument( '--seq_len_cutoff',
+            type = int,
+            help = "The maximum sequence length that will be used in training. If it is longer than this, it will be ignored. Use 0 to allow all lengths (Default 0 )."
+            )
+    parser.add_argument( '--load_model',
+            type = str,
+            help = "Prefix for the model that you want to load. The prefix should have a corresponding .json and .h5 file."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -452,7 +478,8 @@ if __name__ == "__main__":
             epochs = 5,
             training_split = "70,15,15",
             forwards_only = False,
-            verbosity = 0
+            verbosity = 0,
+            seq_len_cutoff = 0
             )
 
     args = parser.parse_args()
