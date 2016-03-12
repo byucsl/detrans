@@ -44,7 +44,7 @@ def number_to_word( index ):
 
 
 def parse_seqs( raw_text, seq_len_cutoff ):
-    return [ x.strip() for x in raw_text.split( '\n' ) if len( x ) <= seq_len_cutoff or seq_len_cutoff == 0 ]
+    return [ x.strip() for x in raw_text.split( '\n' ) if len( x.split( ' ' ) ) <= seq_len_cutoff or seq_len_cutoff == 0 ]
 
 
 def seq_to_indices( seq, index ):
@@ -346,6 +346,12 @@ def main( args ):
         errw( "Full length sequences\n" )
     else:
         errw( str( args.seq_len_cutoff ) + "\n" )
+
+    errw( "\tNumber of seqs for train, validate, test: " )
+    if args.max_seqs == 0:
+        errw( "All\n" )
+    else:
+        errw( str( args.max_seqs ) + "\n" )
     
     if args.classify:
         errw( "\tClassifying: " + args.clasify + "\n" )
@@ -358,6 +364,13 @@ def main( args ):
 
     # load data
     aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
+
+    errw( "Total number of instances read: " + str( len( aa_seqs ) ) + "\n" )
+    if args.max_seqs > 0:
+        errw( "\tOnly using " + str( args.max_seqs ) + " sequences\n" )
+        aa_seqs = aa_seqs[ : args.max_seqs ]
+        cds_seqs = cds_seqs[ : args.max_seqs ]
+    
 
     cds_reverse_index = number_to_word( cds_index )
 
@@ -414,6 +427,7 @@ def main( args ):
     
 
 if __name__ == "__main__":
+    errw( "Command run: " + " ".join( sys.argv ) + "\n" )
     parser = argparse.ArgumentParser(
             description = "Build and train a model for amino acid detranslation."
             )
@@ -470,6 +484,10 @@ if __name__ == "__main__":
             type = str,
             help = "Prefix for the model that you want to load. The prefix should have a corresponding .json and .h5 file."
             )
+    parser.add_argument( '--max_seqs',
+            type = int,
+            help = "The maximum number of sequences to use in training, validation, and test. Specify 0 for all (Default 0)."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -479,7 +497,8 @@ if __name__ == "__main__":
             training_split = "70,15,15",
             forwards_only = False,
             verbosity = 0,
-            seq_len_cutoff = 0
+            seq_len_cutoff = 0,
+            max_seqs = 0
             )
 
     args = parser.parse_args()
