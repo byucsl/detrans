@@ -233,7 +233,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
 
 
 # Take the constructed model and train it using the data provided
-def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix ):
+def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix, idx_to_codon ):
     # TODO: comment this out
     #validate_x = train_x
     #validate_y = train_y
@@ -258,6 +258,19 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
                     }
                 )
 
+        if verbosity > 0:
+            results = model.predict(
+                    {
+                        "input" : validate_x,
+                        "output" : validate_y
+                    },
+                    verbose = 0
+                    )
+
+            outputs = results[ "output" ]
+            acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
+            errw( "\t\tval_acc: " + str( acc ) + "\n" )
+
         # save the model and its weights
         errw( "\t\tSaving model..." )
         json_string = model.to_json()
@@ -266,8 +279,44 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
         errw( "Done!\n" )
 
 
+def get_accuracy( outputs, labels, idx_to_codon ):
+    gen_seqs = []
+    cor_seqs = []
+    correct = 0.
+    incorrect = 0.
+
+    for predicted, actual in zip( outputs, labels ):
+        gen_seq = ""
+        cor_seq = ""
+        for idx, pred in enumerate( predicted ):
+            codon_idx = np.argmax( pred )
+            codon_prob = np.amax( pred )
+            codon = idx_to_codon[ codon_idx ]
+
+            cor_codon_idx = np.argmax( actual[ idx ] )
+            cor_codon = idx_to_codon[ cor_codon_idx ]
+
+            #errw( codon + "\t" + cor_codon + "\n" )
+            if cor_codon == "":
+                continue
+            if cor_codon == codon:
+                correct += 1.
+            else:
+                incorrect += 1.
+            gen_seq += codon
+            cor_seq += cor_codon
+        #errw( gen_seq + "\n" )
+        #errw( cor_seq + "\n" )
+
+        gen_seqs.append( gen_seq )
+        cor_seqs.append( cor_seq )
+
+    accuracy = correct / ( correct + incorrect )
+    return accuracy, gen_seqs, cor_seqs
+
+
 # Take a trained model and print out the accuracy on the test set
-def test_model( model, idx_to_codon, test_x, test_y ):
+def test_model( model, idx_to_codon, test_x, test_y, print_test_seqs ):
     # show accuracy
     # this method doesn't seem to exist for graph models, it does for
     # sequential models though... which is odd
@@ -285,34 +334,25 @@ def test_model( model, idx_to_codon, test_x, test_y ):
     errw( "Done!\n" )
 
     errw( "\tComputing accuracy..." )
-    correct = 0.
-    incorrect = 0.
     outputs = results[ "output" ]
     
-    for predicted, actual in zip( outputs, test_y ):
-        gen_seq = ""
-        cor_seq = ""
-        for idx, pred in enumerate( predicted ):
-            codon_idx = np.argmax( pred )
-            codon_prob = np.amax( pred )
-            codon = idx_to_codon[ codon_idx ]
+    accuracy, gen_seqs, cor_seqs = get_accuracy( outputs, test_y, idx_to_codon )
 
-            cor_codon_idx = np.argmax( actual[ idx ] )
-            cor_codon = idx_to_codon[ cor_codon_idx ]
+    if print_test_seqs:
+        fh = open( "test_dataset.txt", 'w' )
+        
+        counter = 0
+        for i in range( len( gen_seqs ) ):
+            fh.write( ">predicted" + str( counter ) + "\n" )
+            fh.write( gen_seqs[ i ] + "\n" )
+            fh.write( ">correct" + str( counter ) + "\n" )
+            fh.write( cor_seqs[ i ] + "\n" )
+        counter += 1
+        
+        fh.close()
 
-            gen_seq += codon
-            cor_seq += cor_codon
-            #errw( codon + "\t" + cor_codon + "\n" )
-            if cor_codon == "":
-                continue
-            if cor_codon == codon:
-                correct += 1.
-            else:
-                incorrect += 1.
-        #errw( gen_seq + "\n" )
-        #errw( cor_seq + "\n" )
     errw( "Done!\n" )
-    errw( "\tTest set accuracy: " + str( correct / ( incorrect + correct ) ) + "\n" )
+    errw( "\tTest set accuracy: " + str( accuracy ) + "\n" )
 
 
 # TODO: implement
@@ -329,6 +369,7 @@ def errw( string ):
 
 
 def main( args ):
+    start = time.time()
     errw( "Detrans " + version + "\n\n" )
     errw( "Input parameters:\n" )
     errw( "\tAmino acid file: " + args.amino_acids_path + "\n" )
@@ -340,6 +381,9 @@ def main( args ):
     errw( "\tModel save path prefix: " + args.model_save_path + "\n" )
     errw( "\tData splits: " + args.training_split + "\n" )
     errw( "\tModel training verbosity level: " + str( args.verbosity ) + "\n" )
+
+    if args.print_test_seqs:
+        errw( "Printing out the test set sequences after training\n" )
     
     errw( "\tMaximum sequence length for training: " )
     if args.seq_len_cutoff == 0:
@@ -410,13 +454,16 @@ def main( args ):
         model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only )
 
     # train the model
-    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path )
+    # TODO: comment this out
+    #validate_x = train_x
+    #validate_y = train_y
+    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index )
 
     # run model on test dataset and print accuracy
     # TODO: comment this out
     #test_x = train_x
     #test_y = train_y
-    test_model( model, cds_reverse_index, test_x, test_y )
+    test_model( model, cds_reverse_index, test_x, test_y, args.print_test_seqs )
 
     # check if we need to classify another external file
     # classify if we need to and output the results to a file
@@ -424,6 +471,23 @@ def main( args ):
         classify( model, args.classify )
 
     errw( "Done!\n" )
+    end = time.time()
+
+    # in seconds
+    runtime = int( end - start )
+    
+    days = runtime / ( 60 * 60 * 24 )
+    runtime -= days * ( 60 * 60 * 24 )
+
+    hours = runtime / ( 60 * 60 )
+    runtime -= hours * ( 60 * 60 )
+
+    mins = runtime / ( 60 )
+    runtime -= mins * 60
+    
+    secs = runtime
+
+    errw( "Total runtime: " + str( days ) + ":" + str( hours ) + ":" + str( mins ) + ":" + str( secs ) + "\n" )
     
 
 if __name__ == "__main__":
@@ -468,7 +532,7 @@ if __name__ == "__main__":
             help = "A comma separated list of 3 values that denote how to split the input data between training, validation, and testing in that respective order (Default 70,15,15)."
             )
     parser.add_argument( '--forwards_only',
-            type = bool,
+            action = 'store_true',
             help = "Use only forwards LSTMs (Default False)."
             )
     parser.add_argument( '--verbosity',
@@ -488,6 +552,10 @@ if __name__ == "__main__":
             type = int,
             help = "The maximum number of sequences to use in training, validation, and test. Specify 0 for all (Default 0)."
             )
+    parser.add_argument( '--print_test_seqs',
+            action = 'store_true',
+            help = "Print out the test dataset predictions as well as the correct sequence to a file (Default False)."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -498,7 +566,8 @@ if __name__ == "__main__":
             forwards_only = False,
             verbosity = 0,
             seq_len_cutoff = 0,
-            max_seqs = 0
+            max_seqs = 0,
+            print_test_seqs = False
             )
 
     args = parser.parse_args()
