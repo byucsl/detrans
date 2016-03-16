@@ -116,10 +116,16 @@ def split_train_test_validate( split_vals, aa_seqs, cds_seqs ):
     return  train_x, train_y, test_x, test_y, validate_x, validate_y
 
 
-# TODO: implment
 # load a model from disk
 def load_model( model_path ):
-    pass
+    errw( "Loading model with prefix: " + model_path + "\n" )
+    errw( "\tLoading model architecture..." )
+    model = model_from_json( open( model_path + ".json" ).read() )
+    errw( "Done!\n" )
+    errw( "\tLoading model weights..." )
+    model.load_weights( model_path + ".h5" )
+    errw( "Done!\n" )
+    return model
 
 
 # Build the deep BLSTM
@@ -240,6 +246,19 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
 
     # train the model
     errw("Training...\n")
+
+    if verbosity > 0:
+        results = model.predict(
+                {
+                    "input" : validate_x,
+                    "output" : validate_y
+                },
+                verbose = 0
+                )
+
+        outputs = results[ "output" ]
+        acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
+        errw( "\tModel accuracy without any training: " + str( acc ) + "\n" )
 
     for i in range( nb_epochs ):
         errw( "\tTraining epoch: " + str( i ) + "\n" )
@@ -370,6 +389,10 @@ def errw( string ):
 
 def main( args ):
     start = time.time()
+
+    # reset the model save path to include information about your network
+    args.model_save_path += '.' + str( args.embedding_nodes ) + '.' + str( args.hidden_layers ) + '.' + str( args.lstm_nodes )
+
     errw( "Detrans " + version + "\n\n" )
     errw( "Input parameters:\n" )
     errw( "\tAmino acid file: " + args.amino_acids_path + "\n" )
@@ -381,6 +404,9 @@ def main( args ):
     errw( "\tModel save path prefix: " + args.model_save_path + "\n" )
     errw( "\tData splits: " + args.training_split + "\n" )
     errw( "\tModel training verbosity level: " + str( args.verbosity ) + "\n" )
+
+    if args.no_train:
+        errw( "No training!\n" )
 
     if args.print_test_seqs:
         errw( "Printing out the test set sequences after training\n" )
@@ -406,64 +432,66 @@ def main( args ):
     if args.load_model:
         errw( "\tLoading model from: " + args.load_model + "\n" )
 
-    # load data
-    aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
-
-    errw( "Total number of instances read: " + str( len( aa_seqs ) ) + "\n" )
-    if args.max_seqs > 0:
-        errw( "\tOnly using " + str( args.max_seqs ) + " sequences\n" )
-        aa_seqs = aa_seqs[ : args.max_seqs ]
-        cds_seqs = cds_seqs[ : args.max_seqs ]
-    
-
-    cds_reverse_index = number_to_word( cds_index )
-
-    # prepare needed parameters for model training
-    aa_vocab_size = len( aa_index )
-    cds_vocab_size = len( cds_index )
-    max_seq_len = ( len( max( aa_seqs, key = len ) ) + 1 ) / 2
-
-    errw( "Amino acid vocab size: " + str( aa_vocab_size ) + "\n" )
-    errw( "Codons vocab size: " + str( cds_vocab_size ) + "\n" )
-    errw( "Maximum sequence length: " + str( max_seq_len ) + "\n" )
-
-    # prepare text for model training
-    errw( "Prepare sequences for input into learning algorithms\n" )
-    errw( "\tConvert amino acid sequences..." )
-    aa_seqs = seqs_to_indices( aa_seqs, aa_index )
-    errw( "Done!\n" )
-    errw( "\tPad amino acid sequences..." )
-    aa_seqs = pad_sequences( aa_seqs, maxlen = max_seq_len )
-    errw( "Done!\n" )
-    errw( "\tOne-hot encode codon sequences..." )
-    cds_seqs = seqs_to_one_hot( max_seq_len, cds_seqs, cds_index )
-    errw( "Done!\n" )
-
-    # split the data into train, validation, and test data
-    train_x, train_y, test_x, test_y, validate_x, validate_y = split_train_test_validate( args.training_split, aa_seqs, cds_seqs, )
-
-    errw( "Total instances: " + str( len( aa_seqs ) ) + "\n" )
-    errw( "\tTrain instances:    " + str( len( train_x ) ) + "\n" )
-    errw( "\tTest instances:     " + str( len( test_x ) )  + "\n" )
-    errw( "\tValidate instances: " + str( len( validate_x ) ) + "\n" )
-
-    # build or load the model
-    if args.load_model:
+    # TODO: possibly refactor this
+    # If we're not training a model, we don't need to load in a bunch of files
+    if args.no_train:
+        # TODO: load pickled dictionaries that are indicies of codons and amino acids
         model = load_model( args.load_model )
     else:
+        # load data
+        aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
+
+        errw( "Total number of instances read: " + str( len( aa_seqs ) ) + "\n" )
+        if args.max_seqs > 0:
+            errw( "\tOnly using " + str( args.max_seqs ) + " sequences\n" )
+            aa_seqs = aa_seqs[ : args.max_seqs ]
+            cds_seqs = cds_seqs[ : args.max_seqs ]
+        
+
+        cds_reverse_index = number_to_word( cds_index )
+
+        # prepare needed parameters for model training
+        aa_vocab_size = len( aa_index )
+        cds_vocab_size = len( cds_index )
+        max_seq_len = ( len( max( aa_seqs, key = len ) ) + 1 ) / 2
+
+        errw( "Amino acid vocab size: " + str( aa_vocab_size ) + "\n" )
+        errw( "Codons vocab size: " + str( cds_vocab_size ) + "\n" )
+        errw( "Maximum sequence length: " + str( max_seq_len ) + "\n" )
+
+        # prepare text for model training
+        errw( "Prepare sequences for input into learning algorithms\n" )
+        errw( "\tConvert amino acid sequences..." )
+        aa_seqs = seqs_to_indices( aa_seqs, aa_index )
+        errw( "Done!\n" )
+        errw( "\tPad amino acid sequences..." )
+        aa_seqs = pad_sequences( aa_seqs, maxlen = max_seq_len )
+        errw( "Done!\n" )
+        errw( "\tOne-hot encode codon sequences..." )
+        cds_seqs = seqs_to_one_hot( max_seq_len, cds_seqs, cds_index )
+        errw( "Done!\n" )
+
+        # split the data into train, validation, and test data
+        train_x, train_y, test_x, test_y, validate_x, validate_y = split_train_test_validate( args.training_split, aa_seqs, cds_seqs, )
+
+        errw( "Total instances: " + str( len( aa_seqs ) ) + "\n" )
+        errw( "\tTrain instances:    " + str( len( train_x ) ) + "\n" )
+        errw( "\tTest instances:     " + str( len( test_x ) )  + "\n" )
+        errw( "\tValidate instances: " + str( len( validate_x ) ) + "\n" )
+
         model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only )
 
-    # train the model
-    # TODO: comment this out
-    #validate_x = train_x
-    #validate_y = train_y
-    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index )
+        # train the model
+        # TODO: comment this out
+        #validate_x = train_x
+        #validate_y = train_y
+        train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index )
 
-    # run model on test dataset and print accuracy
-    # TODO: comment this out
-    #test_x = train_x
-    #test_y = train_y
-    test_model( model, cds_reverse_index, test_x, test_y, args.print_test_seqs )
+        # run model on test dataset and print accuracy
+        # TODO: comment this out
+        #test_x = train_x
+        #test_y = train_y
+        test_model( model, cds_reverse_index, test_x, test_y, args.print_test_seqs )
 
     # check if we need to classify another external file
     # classify if we need to and output the results to a file
@@ -539,7 +567,7 @@ if __name__ == "__main__":
             type = int,
             help = "Verbosity level when training the network (Default 0)."
             )
-    default_model_save_path = "detrans_model." + time.strftime( "%Y-%m-%d" ) + "-" + time.strftime( "%H-%M-%S" )
+    default_model_save_path = "model." + time.strftime( "%Y-%m-%d" ) + "-" + time.strftime( "%H-%M-%S" )
     parser.add_argument( '--seq_len_cutoff',
             type = int,
             help = "The maximum sequence length that will be used in training. If it is longer than this, it will be ignored. Use 0 to allow all lengths (Default 0 )."
@@ -556,6 +584,10 @@ if __name__ == "__main__":
             action = 'store_true',
             help = "Print out the test dataset predictions as well as the correct sequence to a file (Default False)."
             )
+    parser.add_argument( '--no_train',
+            action = 'store_true',
+            help = "Turn this on if you don't want to train a model. This flag is only useful if classifying with the --clasify flag set as well as --load_model (Default False)."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -567,10 +599,15 @@ if __name__ == "__main__":
             verbosity = 0,
             seq_len_cutoff = 0,
             max_seqs = 0,
-            print_test_seqs = False
+            print_test_seqs = False,
+            no_train = False
             )
 
     args = parser.parse_args()
+
+    # argument dependency validation
+    if args.no_train and not args.classify and not args.load_model:
+        sys.exit( "ERROR: --no_train set and --classify not set. Aborting!\n" )
 
     # parameter checking
     split_total = sum( map( float, args.training_split.split( ',' ) ) )
