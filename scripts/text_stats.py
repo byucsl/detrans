@@ -13,9 +13,12 @@ shortest = float( 'inf' )
 cur_sum = 0
 count = 0
 
+vocab = set()
+
 with open( sys.argv[ 1 ] ) as fh:
     for line in fh:
         len_line = len( line.strip().split( ' ' ) )
+        vocab.update( line.strip().split( ' ' ) )
 
         if len_line > longest:
             longest = len_line
@@ -30,6 +33,7 @@ print( "# of seqs:\t" + str( count ) )
 print( "Longest length:\t" + str( longest ) )
 print( "Shortest length:\t" + str( shortest ) )
 print( "Average length:\t" + str( float( cur_sum ) / count ) )
+print( "Vocabulary size:\t" + str( len( vocab ) ) )
 
 '''print( "longest:" )
 print( longest_seq )
