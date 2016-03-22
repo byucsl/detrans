@@ -2,3 +2,4 @@ data/e_coli
 networks/*.json
 networks/*.h5
 networks/*.txt
+networks/*.p

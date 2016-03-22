@@ -11,8 +11,9 @@ modified by stanley fujimoto (masakistan)
 4 mar 2016
 '''
 
-import sys, argparse, time, re
+import sys, argparse, time, re, pickle
 import numpy as np
+from sklearn.utils import shuffle
 from keras.models import Sequential, Graph
 from keras.layers.core import Merge, Activation, TimeDistributedDense
 from keras.layers.recurrent import LSTM
@@ -433,10 +434,42 @@ def main( args ):
         errw( "\tNot saving model architecture and weights\n" )
     else:
         errw( "\tModel save path prefix: " + args.model_save_path + "\n" )
+
+    if args.seed:
+        errw( "\tSetting data shuffle random seed to: " + str( args.seed ) )
         
 
     # load data
     aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
+
+    # save the indices for loading models later
+    pickle.dump( aa_index, open( args.model_save_path + ".aa_index.p", "wb" ) )
+    pickle.dump( cds_index, open( args.model_save_path + ".cds_index.p", "wb" ) )
+
+    counter = 0
+    print( "*" * 20 )
+    for aa_seq in aa_seqs:
+        print( aa_seq )
+        counter += 1
+        if counter > 6:
+            break
+    print( "*" * 20 )
+
+    errw( "Shuffling data..." )
+    # randomize the data, using a seed if necessary
+    if args.seed:
+        errw( "using seed " + str( args.seed ) + "..." )
+        aa_seqs, cds_seqs = shuffle( aa_seqs, cds_seqs, random_state = args.seed )
+    else:
+        aa_seqs, cds_seqs = shuffle( aa_seqs, cds_seqs )
+    errw( "Done!\n" )
+
+    counter = 0
+    for aa_seq in aa_seqs:
+        print( aa_seq )
+        counter += 1
+        if counter > 6:
+            break
 
     errw( "Total number of instances read: " + str( len( aa_seqs ) ) + "\n" )
     if args.max_seqs > 0:
@@ -444,7 +477,6 @@ def main( args ):
         aa_seqs = aa_seqs[ : args.max_seqs ]
         cds_seqs = cds_seqs[ : args.max_seqs ]
     
-
     cds_reverse_index = number_to_word( cds_index )
 
     # prepare needed parameters for model training
@@ -591,6 +623,10 @@ if __name__ == "__main__":
             action = 'store_true',
             help = "Don't save the model parameters (Default False)."
             )
+    parser.add_argument( '--seed',
+            type = int,
+            help = "Random seed to use when shuffling data."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -603,7 +639,8 @@ if __name__ == "__main__":
             seq_len_cutoff = 0,
             max_seqs = 0,
             print_test_seqs = False,
-            no_save = False
+            no_save = False,
+            seed = None
             )
 
     args = parser.parse_args()
