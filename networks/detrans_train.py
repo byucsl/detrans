@@ -337,7 +337,7 @@ def get_accuracy( outputs, labels, idx_to_codon ):
 
 
 # Take a trained model and print out the accuracy on the test set
-def test_model( model, idx_to_codon, test_x, test_y, print_test_seqs ):
+def test_model( model, model_save_prefix, idx_to_codon, test_x, test_y, print_test_seqs ):
     # show accuracy
     # this method doesn't seem to exist for graph models, it does for
     # sequential models though... which is odd
@@ -360,7 +360,7 @@ def test_model( model, idx_to_codon, test_x, test_y, print_test_seqs ):
     accuracy, gen_seqs, cor_seqs = get_accuracy( outputs, test_y, idx_to_codon )
 
     if print_test_seqs:
-        fh = open( "test_dataset.txt", 'w' )
+        fh = open( "test_dataset" + model_save_prefix +  ".txt", 'w' )
         
         counter = 0
         for i in range( len( gen_seqs ) ):
@@ -510,7 +510,7 @@ def main( args ):
     # TODO: comment this out
     #test_x = train_x
     #test_y = train_y
-    test_model( model, cds_reverse_index, test_x, test_y, args.print_test_seqs )
+    test_model( model, args.model_save_path, cds_reverse_index, test_x, test_y, args.print_test_seqs )
 
     # check if we need to classify another external file
     # classify if we need to and output the results to a file
