@@ -239,7 +239,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
 
 
 # Take the constructed model and train it using the data provided
-def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix, idx_to_codon ):
+def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix, idx_to_codon, no_save ):
     # TODO: comment this out
     #validate_x = train_x
     #validate_y = train_y
@@ -291,11 +291,12 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
             errw( "\t\tval_acc: " + str( acc ) + "\n" )
 
         # save the model and its weights
-        errw( "\t\tSaving model..." )
-        json_string = model.to_json()
-        open( model_save_prefix + ".json", 'w' ).write( json_string )
-        model.save_weights( model_save_prefix + ".h5", overwrite = True )
-        errw( "Done!\n" )
+        if not no_save:
+            errw( "\t\tSaving model..." )
+            json_string = model.to_json()
+            open( model_save_prefix + ".json", 'w' ).write( json_string )
+            model.save_weights( model_save_prefix + ".h5", overwrite = True )
+            errw( "Done!\n" )
 
 
 def get_accuracy( outputs, labels, idx_to_codon ):
@@ -401,7 +402,6 @@ def main( args ):
     errw( "\tHidden layers: " + str( args.hidden_layers ) + "\n" )
     errw( "\tEmbedding layer nodes: " + str( args.embedding_nodes ) + "\n" )
     errw( "\tLSTM output nodes: " + str( args.lstm_nodes ) + "\n" )
-    errw( "\tModel save path prefix: " + args.model_save_path + "\n" )
     errw( "\tData splits: " + args.training_split + "\n" )
     errw( "\tModel training verbosity level: " + str( args.verbosity ) + "\n" )
 
@@ -428,6 +428,12 @@ def main( args ):
 
     if args.load_model:
         errw( "\tLoading model from: " + args.load_model + "\n" )
+
+    if args.no_save:
+        errw( "\tNot saving model architecture and weights\n" )
+    else:
+        errw( "\tModel save path prefix: " + args.model_save_path + "\n" )
+        
 
     # load data
     aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
@@ -482,7 +488,7 @@ def main( args ):
     # TODO: comment this out
     #validate_x = train_x
     #validate_y = train_y
-    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index )
+    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index, args.no_save )
 
     # run model on test dataset and print accuracy
     # TODO: comment this out
@@ -581,6 +587,10 @@ if __name__ == "__main__":
             action = 'store_true',
             help = "Print out the test dataset predictions as well as the correct sequence to a file (Default False)."
             )
+    parser.add_argument( '--no_save',
+            action = 'store_true',
+            help = "Don't save the model parameters (Default False)."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -592,7 +602,8 @@ if __name__ == "__main__":
             verbosity = 0,
             seq_len_cutoff = 0,
             max_seqs = 0,
-            print_test_seqs = False
+            print_test_seqs = False,
+            no_save = False
             )
 
     args = parser.parse_args()
