@@ -446,15 +446,6 @@ def main( args ):
     pickle.dump( aa_index, open( args.model_save_path + ".aa_index.p", "wb" ) )
     pickle.dump( cds_index, open( args.model_save_path + ".cds_index.p", "wb" ) )
 
-    counter = 0
-    print( "*" * 20 )
-    for aa_seq in aa_seqs:
-        print( aa_seq )
-        counter += 1
-        if counter > 6:
-            break
-    print( "*" * 20 )
-
     errw( "Shuffling data..." )
     # randomize the data, using a seed if necessary
     if args.seed:
@@ -463,13 +454,6 @@ def main( args ):
     else:
         aa_seqs, cds_seqs = shuffle( aa_seqs, cds_seqs )
     errw( "Done!\n" )
-
-    counter = 0
-    for aa_seq in aa_seqs:
-        print( aa_seq )
-        counter += 1
-        if counter > 6:
-            break
 
     errw( "Total number of instances read: " + str( len( aa_seqs ) ) + "\n" )
     if args.max_seqs > 0:
