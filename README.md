@@ -36,25 +36,56 @@ See the below for a more comprehensive explanation of steps including different 
   2. Extract CDS for selected species.
   3. Filter CDS, keep only highly expressed sequences.
 4. One-shot learning
-  1. use [detrans_one_shot.py) (networks/detrans_one_shot.py) to fine tune your network for your specific vector
+  1. use [detrans_one_shot.py] (networks/detrans_one_shot.py) to fine tune your network for your specific vector
 5. Detranslate proteins
   1. Use [detrans_classify.py] (networks/detrans_classify.py) to generate a nucleotide sequence from a polypeptide.
 
 # Tutorial
 
-Use the following steps for an end to end example
+Use the following steps for an end to end example.
 
-```
-Commands to run
+
+```bash
+# Install dependencies, it is suggested you use virtualenv
+pip install -r requirements.txt
+
+# Create list of genomes to use for training
+
+# Fetch and prepare CDS data for training
+scripts/entrez_fetch_genome.py args...
+scripts/entrez_fetch_ft.py args...
+scripts/extract_cds_from_fasta.py args..
+
+# Format data for training
+scripts/fasta_nlp.py args...
+
+# Train the model
+networks/detrans_train.py args...
+
+# Prepare data for one-shot learning
+
+# One-shot learning
+
+# Detranslate sequences of interest
 ```
 
 # Dependencies
 
 1. keras (https://github.com/fchollet/keras)
+2. theano (https://github.com/Theano/Theano)
 2. scikit-learn (https://github.com/scikit-learn/scikit-learn)
 3. h5py
 
 # Publication
+
+# Acknowledgements
+
+The authors would like to thank the following individuals for their support in developing this project:
+
+1. Christopher Tensmeyer
+2. Logan Mitchell
+3. Aaron Dennis
+4. Derrall Heath
 
 # Contributors
 @masakistan (sfujimoto@gmail.com)
