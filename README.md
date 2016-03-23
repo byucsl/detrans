@@ -1,20 +1,20 @@
 # detrans
 
-# Purpose
+## Purpose
 
 This project is designed to take an amino acid sequence and convert it into a nucleotide sequence.
 The higher level purpose of this project is to create a different view of codon bias and how we model it.
 Here, we attempt to model codon bias as a natural language processing problem, specifically, translation.
 Generating a language model that can then be used to translate one amino acid sequence string to a nucleotide sequence string provides a method for genering sequences that can be inserted into vectors that are optimized for the codon bias of a particular organism.
 
-# Methods
+## Methods
 
 We utilized recurrent neural networks (RNNs) in order to accomplish this.
 Specifically, we use Long Short-Term Memory (LSTM) networks as a way to learn nucleotide sequence encodings of arbitrary length amino acid sequences.
 LSTMs provide a way to model the long term dependencies that occur within sequences.
 Training of networks is best accomplished using GPUs as they provide significant speedup for network training.
 
-# Workflow
+## Workflow
 
 1. Gather coding DNA sequences (CDS) for training for many species related to your vector
 2. Train network using these sequences
@@ -40,7 +40,7 @@ See the below for a more comprehensive explanation of steps including different 
 5. Detranslate proteins
   1. Use [detrans_classify.py] (networks/detrans_classify.py) to generate a nucleotide sequence from a polypeptide.
 
-# Tutorial
+## Tutorial
 
 Use the following steps for an end to end example.
 
@@ -69,16 +69,16 @@ networks/detrans_train.py args...
 # Detranslate sequences of interest
 ```
 
-# Dependencies
+## Dependencies
 
 1. keras (https://github.com/fchollet/keras)
 2. theano (https://github.com/Theano/Theano)
 2. scikit-learn (https://github.com/scikit-learn/scikit-learn)
 3. h5py
 
-# Publication
+## Publication
 
-# Acknowledgements
+## Acknowledgements
 
 The authors would like to thank the following individuals for their support in developing this project:
 
@@ -87,5 +87,5 @@ The authors would like to thank the following individuals for their support in d
 3. Aaron Dennis
 4. Derrall Heath
 
-# Contributors
+## Contributors
 @masakistan (sfujimoto@gmail.com)
