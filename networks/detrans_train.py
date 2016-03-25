@@ -196,19 +196,28 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                     input = prev_backwards_input
                     )
             errw( "Done!\n" )
-
-    last_inputs = [ "forwards" + str( i ) ]
-    if not forwards_only:
-        last_inputs.append( "backwards" + str( i ) )
-
+    
     errw( "\tAdding dense layer on top of LSTM layers..." )
-    model.add_node(
-            TimeDistributedDense(
-                cds_vocab_size
-                ),
-            name = "timedistributeddense",
-            inputs = last_inputs
-            )
+
+    if not forwards_only:
+        last_inputs = [ "forwards" + str( i ),  "backwards" + str( i ) ]
+
+        model.add_node(
+                TimeDistributedDense(
+                    cds_vocab_size
+                    ),
+                name = "timedistributeddense",
+                inputs = last_inputs
+                )
+    else:
+        last_input = "forwards" + str( i )
+        model.add_node(
+                TimeDistributedDense(
+                    cds_vocab_size
+                    ),
+                name = "timedistributeddense",
+                input = last_input
+                )
     errw( "Done!\n" )
 
     errw( "\tAdding softmax layer..." )
