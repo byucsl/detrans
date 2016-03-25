@@ -409,6 +409,7 @@ def main( args ):
     args.model_save_path += '.' + str( args.embedding_nodes ) + '.' + str( args.hidden_layers ) + '.' + str( args.lstm_nodes )
 
     errw( "Detrans " + version + "\n\n" )
+    errw( "Start date/time: " + str( datetime.datetime.now() ) + "\n" )
     errw( "Input parameters:\n" )
     errw( "\tAmino acid file: " + args.amino_acids_path + "\n" )
     errw( "\tCodons file: " + args.codons_path + "\n" )
@@ -540,6 +541,7 @@ def main( args ):
     errw( "Done!\n" )
     end = time.time()
 
+    errw( "End date/time: " + str( datetime.datetime.now() ) + "\n" )
     print_runtime( start, end )
 
 def print_runtime( start, end ):
