@@ -42,8 +42,7 @@ See the below for a more comprehensive explanation of steps including different 
 
 ## Tutorial
 
-Use the following steps for an end to end example.
-
+Use the following steps for an end to end example on how to run detrans.
 
 ```bash
 # Install dependencies, it is suggested you use virtualenv
@@ -69,6 +68,10 @@ networks/detrans_train.py args...
 # Detranslate sequences of interest
 ```
 
+## Tips for running
+
+1. You may consider training with the --gru option to use GRUs instead of LSTMs as GRUs may train faster
+
 ## Dependencies
 
 1. keras (https://github.com/fchollet/keras)
@@ -82,10 +85,11 @@ networks/detrans_train.py args...
 
 The authors would like to thank the following individuals for their support in developing this project:
 
-1. Christopher Tensmeyer
-2. Logan Mitchell
-3. Aaron Dennis
-4. Derrall Heath
+1. BYU Deep-Learning Study Group
+    1. Christopher Tensmeyer
+    2. Logan Mitchell
+    3. Aaron Dennis
+    4. Derrall Heath
 
 ## Contributors
 @masakistan (sfujimoto@gmail.com)

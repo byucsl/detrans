@@ -16,7 +16,7 @@ import numpy as np
 from sklearn.utils import shuffle
 from keras.models import Sequential, Graph
 from keras.layers.core import Merge, Activation, TimeDistributedDense
-from keras.layers.recurrent import LSTM
+from keras.layers.recurrent import LSTM, GRU
 from keras.optimizers import SGD
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
@@ -132,7 +132,7 @@ def load_model( model_path ):
 # Build the deep BLSTM
 # we're going to do this using a graph structure instead of sequential
 # because it's easier to think about and do, sequential is weird :(
-def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cds_vocab_size, maxlen, forwards_only ):
+def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cds_vocab_size, maxlen, forwards_only, node_type ):
     errw( "Building model" )
     
     model = Graph()
@@ -172,10 +172,10 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
             prev_backwards_input = "backwards" + str( i - 1 )
 
         errw( "\tCreating LSTM layer " + str( i + 1 ) + "\n" )
-        errw( "\t\tAdding forwards layer built..." )
+        errw( "\t\tAdding forwards layer..." )
 
         model.add_node(
-                LSTM(
+                node_type(
                     nb_lstm_nodes,
                     return_sequences = True
                     ),
@@ -278,6 +278,7 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
                     }
                 )
 
+
         if verbosity > 0:
             results = model.predict(
                     {
@@ -290,6 +291,8 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
             outputs = results[ "output" ]
             acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
             errw( "\t\tval_acc: " + str( acc ) + "\n" )
+
+            errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
 
         # save the model and its weights
         if not no_save:
@@ -436,7 +439,14 @@ def main( args ):
         errw( "\tModel save path prefix: " + args.model_save_path + "\n" )
 
     if args.seed:
-        errw( "\tSetting data shuffle random seed to: " + str( args.seed ) )
+        errw( "\tSetting data shuffle random seed to: " + str( args.seed ) + "\n" )
+
+    if args.gru:
+        errw( "\tUsing GRU in the RNN\n" )
+        node_type = GRU
+    else:
+        errw( "\tUsing LSTM in the RNN\n" )
+        node_type = LSTM
         
 
     # load data
@@ -498,7 +508,7 @@ def main( args ):
         # TODO: load pickled dictionaries that are indicies of codons and amino acids
         model = load_model( args.load_model )
     else:
-         model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only )
+         model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only, node_type )
 
     # train the model
     # TODO: comment this out
@@ -611,6 +621,10 @@ if __name__ == "__main__":
             type = int,
             help = "Random seed to use when shuffling data."
             )
+    parser.add_argument( '--gru',
+            action = 'store_true',
+            help = "Change from the default LSTM to using a GRU. GRU may train faster than LSTM."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -624,7 +638,8 @@ if __name__ == "__main__":
             max_seqs = 0,
             print_test_seqs = False,
             no_save = False,
-            seed = None
+            seed = None,
+            gru = False
             )
 
     args = parser.parse_args()
