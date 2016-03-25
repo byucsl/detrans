@@ -11,7 +11,7 @@ modified by stanley fujimoto (masakistan)
 4 mar 2016
 '''
 
-import sys, argparse, time, re, pickle
+import sys, argparse, datetime, time, re, pickle
 import numpy as np
 from sklearn.utils import shuffle
 from keras.models import Sequential, Graph
@@ -262,7 +262,8 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
         errw( "\tModel accuracy without any training: " + str( acc ) + "\n" )
 
     for i in range( nb_epochs ):
-        errw( "\tTraining epoch: " + str( i ) + "\n" )
+        if verbosity > 0:
+            errw( "\tTraining epoch: " + str( i + 1 ) + "/" + str( nb_epochs ) + "\n" )
         model.fit(
                 {
                     "input" : train_x,
@@ -530,6 +531,9 @@ def main( args ):
     errw( "Done!\n" )
     end = time.time()
 
+    print_runtime( start, end )
+
+def print_runtime( start, end ):
     # in seconds
     runtime = int( end - start )
     
@@ -544,7 +548,20 @@ def main( args ):
     
     secs = runtime
 
-    errw( "Total runtime: " + str( days ) + ":" + str( hours ) + ":" + str( mins ) + ":" + str( secs ) + "\n" )
+    # format strings
+    days = str( days )
+    days = "0" * ( 2 - len( days ) ) + days
+
+    hours = str( hours )
+    hours = "0" * ( 2 - len( hours ) ) + hours
+
+    mins = str( mins )
+    mins = "0" * ( 2 - len( mins ) ) + mins
+
+    secs = str( secs )
+    secs = "0" * ( 2 - len( secs ) ) + secs
+
+    errw( "Total runtime: " + days + ":" + hours + ":" + mins + ":" + secs + "\n" )
     
 
 if __name__ == "__main__":
