@@ -202,7 +202,9 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
             model.add_node(
                     LSTM(
                         nb_lstm_nodes,
-                        return_sequences = True
+                        return_sequences = True,
+                        dropout_W = drop_w,
+                        dropout_U = drop_u
                         ),
                     name = "backwards" + str( i ),
                     input = prev_backwards_input
@@ -478,6 +480,14 @@ def main( args ):
     # load data
     aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
 
+    # prepare needed parameters for model training
+    aa_vocab_size = len( aa_index )
+    cds_vocab_size = len( cds_index )
+    max_seq_len = ( len( max( aa_seqs, key = len ) ) + 1 ) / 2
+
+    errw( "Amino acid vocab size: " + str( aa_vocab_size ) + "\n" )
+    errw( "Codons vocab size: " + str( cds_vocab_size ) + "\n" )
+    errw( "Maximum sequence length: " + str( max_seq_len ) + "\n" )
 
     # check if we're loading a previously trained model
     if args.load_model:
@@ -486,7 +496,7 @@ def main( args ):
         model, t_aa_index, t_cds_index = load_model( args.load_model )
         
         # Perform a check to make sure the loaded vocabulary from a previous run contains all words for the currently laoded dataset
-        if set( t_aa_index.keys() ) != set( aa_index.keys() ) or set( t_cds_index.keys() ) != set( cds_index_keys() ):
+        if not set( aa_index.keys() ).issubset( set( t_aa_index.keys() ) ) or not set( cds_index_keys() ).issubset( set( t_cds_index.keys() ) ):
             sys.exit( "ERROR: loaded amino acid index does not contain all words in the loaded traning set. Aborting!\n" )
 
         # if tests pass then we need to overwrite the indices
@@ -516,15 +526,6 @@ def main( args ):
         cds_seqs = cds_seqs[ : args.max_seqs ]
     
     cds_reverse_index = number_to_word( cds_index )
-
-    # prepare needed parameters for model training
-    aa_vocab_size = len( aa_index )
-    cds_vocab_size = len( cds_index )
-    max_seq_len = ( len( max( aa_seqs, key = len ) ) + 1 ) / 2
-
-    errw( "Amino acid vocab size: " + str( aa_vocab_size ) + "\n" )
-    errw( "Codons vocab size: " + str( cds_vocab_size ) + "\n" )
-    errw( "Maximum sequence length: " + str( max_seq_len ) + "\n" )
 
     # prepare text for model training
     errw( "Prepare sequences for input into learning algorithms\n" )
