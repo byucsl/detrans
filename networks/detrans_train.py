@@ -123,16 +123,26 @@ def load_model( model_path ):
     errw( "\tLoading model architecture..." )
     model = model_from_json( open( model_path + ".json" ).read() )
     errw( "Done!\n" )
+
     errw( "\tLoading model weights..." )
     model.load_weights( model_path + ".h5" )
     errw( "Done!\n" )
-    return model
+
+    errw( "\tLoading amino acid index..." )
+    aa_index = picke.load( open( model_path + "aa_index.p", "rb" ) )
+    errw( "Done!\n" )
+
+    errw( "\tLoading codons index..." )
+    cds_index = picle.load( open( model_path + "cds_index.p", "rb" ) )
+    errw( "Done!\n" )
+
+    return model, aa_index, cds_index
 
 
 # Build the deep BLSTM
 # we're going to do this using a graph structure instead of sequential
 # because it's easier to think about and do, sequential is weird :(
-def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cds_vocab_size, maxlen, forwards_only, node_type ):
+def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cds_vocab_size, maxlen, forwards_only, node_type, drop_w, drop_u ):
     errw( "Building model" )
     
     model = Graph()
@@ -177,7 +187,9 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
         model.add_node(
                 node_type(
                     nb_lstm_nodes,
-                    return_sequences = True
+                    return_sequences = True,
+                    dropout_W = drop_w,
+                    dropout_U = drop_u
                     ),
                 name = "forwards" + str( i ),
                 input = prev_forwards_input
@@ -416,9 +428,11 @@ def main( args ):
     errw( "\tNumber epochs for training: " + str( args.epochs ) + "\n" )
     errw( "\tHidden layers: " + str( args.hidden_layers ) + "\n" )
     errw( "\tEmbedding layer nodes: " + str( args.embedding_nodes ) + "\n" )
-    errw( "\tLSTM output nodes: " + str( args.lstm_nodes ) + "\n" )
+    errw( "\tRNN output nodes: " + str( args.lstm_nodes ) + "\n" )
     errw( "\tData splits: " + args.training_split + "\n" )
     errw( "\tModel training verbosity level: " + str( args.verbosity ) + "\n" )
+    errw( "\tDropout W: " + str( args.dropout_w ) + "\n" )
+    errw( "\tDropout U: " + str( args.dropout_u ) + "\n" )
 
     if args.print_test_seqs:
         errw( "Printing out the test set sequences after training\n" )
@@ -443,6 +457,7 @@ def main( args ):
 
     if args.load_model:
         errw( "\tLoading model from: " + args.load_model + "\n" )
+        args.model.save_path = args.load_model
 
     if args.no_save:
         errw( "\tNot saving model architecture and weights\n" )
@@ -463,9 +478,27 @@ def main( args ):
     # load data
     aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
 
-    # save the indices for loading models later
-    pickle.dump( aa_index, open( args.model_save_path + ".aa_index.p", "wb" ) )
-    pickle.dump( cds_index, open( args.model_save_path + ".cds_index.p", "wb" ) )
+
+    # check if we're loading a previously trained model
+    if args.load_model:
+
+        # load in parameters and indices
+        model, t_aa_index, t_cds_index = load_model( args.load_model )
+        
+        # Perform a check to make sure the loaded vocabulary from a previous run contains all words for the currently laoded dataset
+        if set( t_aa_index.keys() ) != set( aa_index.keys() ) or set( t_cds_index.keys() ) != set( cds_index_keys() ):
+            sys.exit( "ERROR: loaded amino acid index does not contain all words in the loaded traning set. Aborting!\n" )
+
+        # if tests pass then we need to overwrite the indices
+        aa_index = t_aa_index
+        cds_index = t_aa_index
+    else:
+        # save the indices for loading models later
+        pickle.dump( aa_index, open( args.model_save_path + ".aa_index.p", "wb" ) )
+        pickle.dump( cds_index, open( args.model_save_path + ".cds_index.p", "wb" ) )
+
+        model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only, node_type, args.dropout_w, args.dropout_u )
+
 
     errw( "Shuffling data..." )
     # randomize the data, using a seed if necessary
@@ -495,12 +528,15 @@ def main( args ):
 
     # prepare text for model training
     errw( "Prepare sequences for input into learning algorithms\n" )
+    
     errw( "\tConvert amino acid sequences..." )
     aa_seqs = seqs_to_indices( aa_seqs, aa_index )
     errw( "Done!\n" )
+    
     errw( "\tPad amino acid sequences..." )
     aa_seqs = pad_sequences( aa_seqs, maxlen = max_seq_len )
     errw( "Done!\n" )
+    
     errw( "\tOne-hot encode codon sequences..." )
     cds_seqs = seqs_to_one_hot( max_seq_len, cds_seqs, cds_index )
     errw( "Done!\n" )
@@ -513,13 +549,6 @@ def main( args ):
     errw( "\tTest instances:     " + str( len( test_x ) )  + "\n" )
     errw( "\tValidate instances: " + str( len( validate_x ) ) + "\n" )
 
-
-    # If we're not training a model, we don't need to load in a bunch of files
-    if args.load_model:
-        # TODO: load pickled dictionaries that are indicies of codons and amino acids
-        model = load_model( args.load_model )
-    else:
-         model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only, node_type )
 
     # train the model
     # TODO: comment this out
@@ -543,6 +572,7 @@ def main( args ):
 
     errw( "End date/time: " + str( datetime.datetime.now() ) + "\n" )
     print_runtime( start, end )
+
 
 def print_runtime( start, end ):
     # in seconds
@@ -653,6 +683,14 @@ if __name__ == "__main__":
             action = 'store_true',
             help = "Change from the default LSTM to using a GRU. GRU may train faster than LSTM."
             )
+    parser.add_argument( '--dropout_w',
+            type = float,
+            help = "Float between 0 and 1. Fraction of input units to drop for input gates (Default 0)."
+            )
+    parser.add_argument( '--dropout_u',
+            type = float,
+            help = "Float between 0 and 1. Fraction of input units to drop for recurrent connections (Default 0)."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -667,7 +705,9 @@ if __name__ == "__main__":
             print_test_seqs = False,
             no_save = False,
             seed = None,
-            gru = False
+            gru = False,
+            dropout_w = 0.0,
+            dropout_u = 0.0
             )
 
     args = parser.parse_args()
