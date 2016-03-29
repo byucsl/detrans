@@ -17,27 +17,27 @@ Training of networks is best accomplished using GPUs as they provide significant
 ## Workflow
 
 1. Gather coding DNA sequences (CDS) for training for many species related to your vector
-2. Train network using these sequences
-3. Select a specific species (the vector you will be using), select only their highly expressed genes
-4. Fine tune the network trained on many species with many species by using the subset of highly expressed genes for your vector
+1. Train network using these sequences
+1. Select a specific species (the vector you will be using), select only their highly expressed genes
+1. Fine tune the network trained on many species with many species by using the subset of highly expressed genes for your vector
 
 See the below for a more comprehensive explanation of steps including different scripts to use for different aspects of the workflow.
 
 1. Fetch and prepare CDS data for training
   1. Create a text file that contains the NCBI genome IDs for species you will train with
-  2. Use [entrez_fetch_genome.py] (scripts/entrez_fetch_genome.py) to fetch genomes from NCBI.
-  3. Use [entrez_fetch_ft.py] (scripts/entrez_fetch_ft.py) to fetch the feature tables for the specified species from NCBI.
-  4. Use [extract_cds_from_fasta.py] (scripts/extract_cds_from_fasta.py) to extract the CDS from genomes using the feature tables. This will also create a fasta file containing the translated sequences.
-  5. Use [fasta_nlp.py] (scripts/fasta_nlp.py) to convert the fasta CDS and amino acid sequence files to the correct format for training.
-2. Train the network
+  1. Use [entrez_fetch_genome.py] (scripts/entrez_fetch_genome.py) to fetch genomes from NCBI.
+  1. Use [entrez_fetch_ft.py] (scripts/entrez_fetch_ft.py) to fetch the feature tables for the specified species from NCBI.
+  1. Use [extract_cds_from_fasta.py] (scripts/extract_cds_from_fasta.py) to extract the CDS from genomes using the feature tables. This will also create a fasta file containing the translated sequences. Note that this script will remove any sequences that contain ambiguity codes. Ambiguity codes are not supported by this application at this time.
+  1. Use [fasta_nlp.py] (scripts/fasta_nlp.py) to convert the fasta CDS and amino acid sequence files to the correct format for training.
+1. Train the network
   1. Use [detrans_train.py] (networks/detrans_train.py) to train the general network
-3. Prepare data for one-shot learning
+1. Prepare data for one-shot learning
   1. Select species of interest (most likely the vector you're using).
-  2. Extract CDS for selected species.
-  3. Filter CDS, keep only highly expressed sequences.
-4. One-shot learning
+  1. Extract CDS for selected species.
+  1. Filter CDS, keep only highly expressed (or other characteristic) sequences.
+1. One-shot learning
   1. use [detrans_one_shot.py] (networks/detrans_one_shot.py) to fine tune your network for your specific vector
-5. Detranslate proteins
+1. Detranslate proteins
   1. Use [detrans_classify.py] (networks/detrans_classify.py) to generate a nucleotide sequence from a polypeptide.
 
 ## Tutorial
@@ -62,8 +62,10 @@ scripts/fasta_nlp.py args...
 networks/detrans_train.py args...
 
 # Prepare data for one-shot learning
+scripts/fasta_nlp.py args...
 
 # One-shot learning
+networks/detrains_train.py --one_shot --load_model model_prefix args...
 
 # Detranslate sequences of interest
 ```
@@ -71,13 +73,14 @@ networks/detrans_train.py args...
 ## Tips for running
 
 1. You may consider training with the --gru option to use GRUs instead of LSTMs as GRUs may train faster
+1. During one-shot training, use 1 (or few) training epochs so that you don't overtrain your models
 
 ## Dependencies
 
 1. keras (https://github.com/fchollet/keras)
-2. theano (https://github.com/Theano/Theano)
-2. scikit-learn (https://github.com/scikit-learn/scikit-learn)
-3. h5py
+1. theano (https://github.com/Theano/Theano)
+1. scikit-learn (https://github.com/scikit-learn/scikit-learn)
+1. h5py
 
 ## Publication
 
@@ -87,9 +90,10 @@ The authors would like to thank the following individuals for their support in d
 
 1. BYU Deep-Learning Study Group
     1. Christopher Tensmeyer
-    2. Logan Mitchell
-    3. Aaron Dennis
-    4. Derrall Heath
+    1. Logan Mitchell
+    1. Mike Brodie
+    1. Aaron Dennis
+    1. Derrall Heath
 
 ## Contributors
 @masakistan (sfujimoto@gmail.com)

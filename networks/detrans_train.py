@@ -14,7 +14,7 @@ modified by stanley fujimoto (masakistan)
 import sys, argparse, datetime, time, re, pickle
 import numpy as np
 from sklearn.utils import shuffle
-from keras.models import Sequential, Graph
+from keras.models import Graph, model_from_json
 from keras.layers.core import Merge, Activation, TimeDistributedDense
 from keras.layers.recurrent import LSTM, GRU
 from keras.optimizers import SGD
@@ -22,7 +22,29 @@ from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
 from keras.layers.embeddings import Embedding
 
+sys.setrecursionlimit(10000)
+
+# Global variables
 version = "0.1a"
+codon_to_aa = {
+    "TTT":"F", "TTC":"F", "TTA":"L", "TTG":"L",
+    "TCT":"S", "TCC":"S", "TCA":"S", "TCG":"S",
+    "TAT":"Y", "TAC":"Y", "TAA":"*", "TAG":"*",
+    "TGT":"C", "TGC":"C", "TGA":"*", "TGG":"W",
+    "CTT":"L", "CTC":"L", "CTA":"L", "CTG":"L",
+    "CCT":"P", "CCC":"P", "CCA":"P", "CCG":"P",
+    "CAT":"H", "CAC":"H", "CAA":"Q", "CAG":"Q",
+    "CGT":"R", "CGC":"R", "CGA":"R", "CGG":"R",
+    "ATT":"I", "ATC":"I", "ATA":"I", "ATG":"M",
+    "ACT":"T", "ACC":"T", "ACA":"T", "ACG":"T",
+    "AAT":"N", "AAC":"N", "AAA":"K", "AAG":"K",
+    "AGT":"S", "AGC":"S", "AGA":"R", "AGG":"R",
+    "GTT":"V", "GTC":"V", "GTA":"V", "GTG":"V",
+    "GCT":"A", "GCC":"A", "GCA":"A", "GCG":"A",
+    "GAT":"D", "GAC":"D", "GAA":"E", "GAG":"E",
+    "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"
+    }
+
 
 def read_raw_text( file_path ):
     return open( file_path, 'r' ).read().strip()
@@ -63,7 +85,13 @@ def seqs_to_one_hot( maxlen, seqs, index ):
         offset = maxlen - len( seq )
 
         for cidx, codon in enumerate( seq ):
-            encodings[ sidx ][ offset + cidx ][ index[ codon ] ] = 1
+            try:
+                encodings[ sidx ][ offset + cidx ][ index[ codon ] ] = 1
+            except KeyError:
+                # This should only happen if the pretrained network didn't have all the
+                # codons that are being used in later training. This should be fixed
+                # in current releases.
+                encodings[ sidx ][ offset + cidx ][ 0 ] = 1
     return encodings
 
 
@@ -72,14 +100,16 @@ def load_data( amino_acid_path, codons_path, seq_len_cutoff ):
     
     sys.stderr.write( "\tLoading amino acid file..." )
     aa_raw_text = read_raw_text( amino_acid_path )
-    amino_acids_vocab = unique_words( aa_raw_text )
+    #amino_acids_vocab = unique_words( aa_raw_text )
+    amino_acids_vocab = set( codon_to_aa.values() )
     aa_index = word_to_number( amino_acids_vocab )
     aa_seqs = parse_seqs( aa_raw_text, seq_len_cutoff )
     sys.stderr.write( "Done!\n" )
 
     sys.stderr.write( "\tLoading codon file..." )
     cds_raw_text = read_raw_text( codons_path )
-    codons_vocab = unique_words( cds_raw_text )
+    #codons_vocab = unique_words( cds_raw_text )
+    codons_vocab = set( codon_to_aa.keys() )
     cds_index = word_to_number( codons_vocab )
     cds_seqs = parse_seqs( cds_raw_text, seq_len_cutoff )
     sys.stderr.write( "Done!\n" )
@@ -118,10 +148,18 @@ def split_train_test_validate( split_vals, aa_seqs, cds_seqs ):
 
 
 # load a model from disk
-def load_model( model_path ):
+def load_model( model_path, one_shot ):
     errw( "Loading model with prefix: " + model_path + "\n" )
     errw( "\tLoading model architecture..." )
-    model = model_from_json( open( model_path + ".json" ).read() )
+    
+    # read the model architecture from the json file
+    model_arch = open( model_path + ".json" ).read()
+
+    if args.one_shot:
+        # change parameters so that certain layers are not trained.
+        model_arch = freeze_layers( model_arch )
+
+    model = model_from_json( model_arch )
     errw( "Done!\n" )
 
     errw( "\tLoading model weights..." )
@@ -129,11 +167,11 @@ def load_model( model_path ):
     errw( "Done!\n" )
 
     errw( "\tLoading amino acid index..." )
-    aa_index = picke.load( open( model_path + "aa_index.p", "rb" ) )
+    aa_index = pickle.load( open( model_path + ".aa_index.p", "rb" ) )
     errw( "Done!\n" )
 
     errw( "\tLoading codons index..." )
-    cds_index = picle.load( open( model_path + "cds_index.p", "rb" ) )
+    cds_index = pickle.load( open( model_path + ".cds_index.p", "rb" ) )
     errw( "Done!\n" )
 
     return model, aa_index, cds_index
@@ -200,7 +238,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
         if not forwards_only:
             errw( "\t\tAdding backwards layer..." )
             model.add_node(
-                    LSTM(
+                    node_type(
                         nb_lstm_nodes,
                         return_sequences = True,
                         dropout_W = drop_w,
@@ -239,7 +277,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
             Activation(
                 "softmax"
                 ),
-            name = "activation",
+            name = "classification",
             input = "timedistributeddense"
             )
     errw( "Done!\n" )
@@ -247,12 +285,14 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
     errw( "\tAdding final output node to graph..." )
     model.add_output(
             name = "output",
-            input = "activation"
+            input = "classification"
             )
     errw( "Done!\n" )
 
     errw( "\tCompile constructed model..." )
-    #model.compile( loss = 'categorical_crossentropy', optimizer = 'rmsprop' )
+
+    # TODO: enable learning rate as a user defined setting
+
     model.compile(
             loss = { "output" : "categorical_crossentropy" },
             optimizer = "rmsprop"
@@ -403,6 +443,33 @@ def test_model( model, model_save_prefix, idx_to_codon, test_x, test_y, print_te
     errw( "\tTest set accuracy: " + str( accuracy ) + "\n" )
 
 
+# This method will modify the model architecture json file so that it freezes the weights
+# for all the deep layers and leaves the last layer, the classification layer, available
+# for training
+def freeze_layers( model_arch ):
+    
+    # this only works for models that haven't been compiled yet, make pull request to 
+    # keras and see if we can change this
+    #for name, layer in model.nodes().iteritems():
+        # for legacy reasons we need to also check if it's "activation" or not, this can
+        # be removed in future versions once i'm only using newly trained models
+    #    if name != "classification" and name != "activation":
+    #        layer.trainable = False
+
+    # because you can't modifiy a compiled model, we'll modify the json string representation
+    # of the model
+    import json
+    config = json.loads( model_arch )
+
+    for node in config[ "nodes" ]:
+        if node != "activation" and node != "classification":
+            config[ "nodes" ][ node ][ "trainable" ] = False
+
+    errw( "Modified model for one-shot learning..." )
+    #errw( "Done!\n" )
+
+    return json.dumps( config )
+
 # TODO: implement
 # Classify a given file, output is written to a file with the same name
 # as the file_path + '.results' extension added. The output will be in
@@ -422,19 +489,35 @@ def main( args ):
     # reset the model save path to include information about your network
     args.model_save_path += '.' + str( args.embedding_nodes ) + '.' + str( args.hidden_layers ) + '.' + str( args.lstm_nodes )
 
+    if args.gru:
+        args.model_save_path += ".gru"
+
     errw( "Detrans " + version + "\n\n" )
     errw( "Start date/time: " + str( datetime.datetime.now() ) + "\n" )
     errw( "Input parameters:\n" )
     errw( "\tAmino acid file: " + args.amino_acids_path + "\n" )
     errw( "\tCodons file: " + args.codons_path + "\n" )
     errw( "\tNumber epochs for training: " + str( args.epochs ) + "\n" )
-    errw( "\tHidden layers: " + str( args.hidden_layers ) + "\n" )
-    errw( "\tEmbedding layer nodes: " + str( args.embedding_nodes ) + "\n" )
-    errw( "\tRNN output nodes: " + str( args.lstm_nodes ) + "\n" )
-    errw( "\tData splits: " + args.training_split + "\n" )
-    errw( "\tModel training verbosity level: " + str( args.verbosity ) + "\n" )
-    errw( "\tDropout W: " + str( args.dropout_w ) + "\n" )
-    errw( "\tDropout U: " + str( args.dropout_u ) + "\n" )
+
+    if not args.load_model:
+        errw( "\tHidden layers: " + str( args.hidden_layers ) + "\n" )
+        errw( "\tEmbedding layer nodes: " + str( args.embedding_nodes ) + "\n" )
+        errw( "\tRNN output nodes: " + str( args.lstm_nodes ) + "\n" )
+        errw( "\tData splits: " + args.training_split + "\n" )
+        errw( "\tModel training verbosity level: " + str( args.verbosity ) + "\n" )
+        errw( "\tDropout W: " + str( args.dropout_w ) + "\n" )
+        errw( "\tDropout U: " + str( args.dropout_u ) + "\n" )
+        if args.gru:
+            errw( "\tUsing GRU in the RNN\n" )
+            node_type = GRU
+        else:
+            errw( "\tUsing LSTM in the RNN\n" )
+            node_type = LSTM
+        if args.forwards_only:
+            errw( "\tForwards only network (not bidirectional)\n" )
+
+    else:
+        errw( "\tModel parameters from saved model\n" )
 
     if args.print_test_seqs:
         errw( "Printing out the test set sequences after training\n" )
@@ -454,12 +537,11 @@ def main( args ):
     if args.classify:
         errw( "\tClassifying: " + args.clasify + "\n" )
     
-    if args.forwards_only:
-        errw( "\tForwards only network (not bidirectional)\n" )
-
     if args.load_model:
         errw( "\tLoading model from: " + args.load_model + "\n" )
-        args.model.save_path = args.load_model
+        if args.one_shot:
+            args.model_save_path += "." + args.one_shot
+        args.model_save_path = args.load_model
 
     if args.no_save:
         errw( "\tNot saving model architecture and weights\n" )
@@ -469,12 +551,8 @@ def main( args ):
     if args.seed:
         errw( "\tSetting data shuffle random seed to: " + str( args.seed ) + "\n" )
 
-    if args.gru:
-        errw( "\tUsing GRU in the RNN\n" )
-        node_type = GRU
-    else:
-        errw( "\tUsing LSTM in the RNN\n" )
-        node_type = LSTM
+    if args.one_shot:
+        errw( "\tPerforming one-shot training.\n" )
         
 
     # load data
@@ -493,15 +571,17 @@ def main( args ):
     if args.load_model:
 
         # load in parameters and indices
-        model, t_aa_index, t_cds_index = load_model( args.load_model )
+        model, t_aa_index, t_cds_index = load_model( args.load_model, args.one_shot )
         
         # Perform a check to make sure the loaded vocabulary from a previous run contains all words for the currently laoded dataset
-        if not set( aa_index.keys() ).issubset( set( t_aa_index.keys() ) ) or not set( cds_index_keys() ).issubset( set( t_cds_index.keys() ) ):
+        if not set( aa_index.keys() ).issubset( set( t_aa_index.keys() ) ) or not set( cds_index.keys() ).issubset( set( t_cds_index.keys() ) ):
             sys.exit( "ERROR: loaded amino acid index does not contain all words in the loaded traning set. Aborting!\n" )
 
         # if tests pass then we need to overwrite the indices
         aa_index = t_aa_index
         cds_index = t_aa_index
+
+        # if we're doing one shot learning, we need to modify the loaded model so that only the last layer is trainable.
     else:
         # save the indices for loading models later
         pickle.dump( aa_index, open( args.model_save_path + ".aa_index.p", "wb" ) )
@@ -692,6 +772,10 @@ if __name__ == "__main__":
             type = float,
             help = "Float between 0 and 1. Fraction of input units to drop for recurrent connections (Default 0)."
             )
+    parser.add_argument( '--one_shot',
+            type = str,
+            help = "Use one-shot learning, add identifier to the trained model so the pre-trained model is preserved and the fine-tuned model is saved to a new location."
+            )
     parser.set_defaults(
             hidden_layers = 1,
             embedding_nodes = 128,
@@ -713,12 +797,24 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # *******************************************
     # argument dependency validation
 
-    # parameter checking
+    ## This is 
+    if args.one_shot and not args.load_model:
+        sys.exit( "ERROR: one shot learning was specified but no pre-trained model was specified to load.\n\tUse the --load_model flag to specify a pre-trained model.\n\tAborting!\n" )
+
+    # end argument dependency validation
+    # *******************************************
+
+    # *******************************************
+    # argument parameter validation
     split_total = sum( map( float, args.training_split.split( ',' ) ) )
     if split_total > 100.1 or split_total < 99.9:
-        sys.exit( "ERROR: Dataset split " + args.training_split + " does not sum to 100!\n" )
+        sys.exit( "ERROR: Dataset split " + args.training_split + " does not sum to 100!\n\tAborting!\n" )
+    
+    # end argument parameter validation
+    # *******************************************
 
     main( args )
 
