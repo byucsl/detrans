@@ -241,6 +241,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                     node_type(
                         nb_lstm_nodes,
                         return_sequences = True,
+                        go_backwards = True,
                         dropout_W = drop_w,
                         dropout_U = drop_u
                         ),
@@ -258,7 +259,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                 TimeDistributedDense(
                     cds_vocab_size
                     ),
-                name = "timedistributeddense",
+                name = "classification",
                 inputs = last_inputs
                 )
     else:
@@ -267,7 +268,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                 TimeDistributedDense(
                     cds_vocab_size
                     ),
-                name = "timedistributeddense",
+                name = "classification",
                 input = last_input
                 )
     errw( "Done!\n" )
@@ -277,15 +278,15 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
             Activation(
                 "softmax"
                 ),
-            name = "classification",
-            input = "timedistributeddense"
+            name = "activation",
+            input = "classification"
             )
     errw( "Done!\n" )
 
     errw( "\tAdding final output node to graph..." )
     model.add_output(
             name = "output",
-            input = "classification"
+            input = "activation"
             )
     errw( "Done!\n" )
 
@@ -457,13 +458,22 @@ def freeze_layers( model_arch ):
     #        layer.trainable = False
 
     # because you can't modifiy a compiled model, we'll modify the json string representation
-    # of the model
+    # of the model by setting 'trainable' to false and also setting dropout_U and dropout_W
+    # to 0 so that the whole network is utilized.
     import json
     config = json.loads( model_arch )
 
     for node in config[ "nodes" ]:
-        if node != "activation" and node != "classification":
+        if node != "classification":
             config[ "nodes" ][ node ][ "trainable" ] = False
+
+            # this is only necessary if the model was trained with dropout
+            # but we perofrm it for everyone anyways just to ensure the whole
+            # network is used during one-shot training
+            if "backwards" in node or "forwwards" in node:
+                config[ "nodes" ][ node ][ "dropout_U" ] = 0.0
+                config[ "nodes" ][ node ][ "dropout_W" ] = 0.0
+
 
     errw( "Modified model for one-shot learning..." )
     #errw( "Done!\n" )
@@ -539,9 +549,9 @@ def main( args ):
     
     if args.load_model:
         errw( "\tLoading model from: " + args.load_model + "\n" )
+        args.model_save_path = args.load_model
         if args.one_shot:
             args.model_save_path += "." + args.one_shot
-        args.model_save_path = args.load_model
 
     if args.no_save:
         errw( "\tNot saving model architecture and weights\n" )
@@ -579,7 +589,7 @@ def main( args ):
 
         # if tests pass then we need to overwrite the indices
         aa_index = t_aa_index
-        cds_index = t_aa_index
+        cds_index = t_cds_index
 
         # if we're doing one shot learning, we need to modify the loaded model so that only the last layer is trainable.
     else:
