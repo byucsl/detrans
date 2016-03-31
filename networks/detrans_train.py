@@ -147,24 +147,54 @@ def split_train_test_validate( split_vals, aa_seqs, cds_seqs ):
     return  train_x, train_y, test_x, test_y, validate_x, validate_y
 
 
+# This method will modify the model architecture json file so that it freezes the weights
+# for all the deep layers and leaves the last layer, the classification layer, available
+# for training
+def freeze_network( model ):
+    errw( "\tFreezing weights..." )
+    for name, node in model.nodes.iteritems():
+        if name != "classification":
+            node.trainable = False
+
+            if "forwards" in name or "backwards" in name:
+                node.dropout_W = 0.0
+                node.dropout_U = 0.0
+
+    errw( "Done!\n" )
+
+
+def reset_weights( model, nodes_to_reset ):
+    errw( "\tResetting layer weights for one-shot learning..." )
+
+    for name, node in model.nodes.iteritems():
+        if name in nodes_to_reset:
+            node.build()
+
+    errw( "Done!\n" )
+
+
 # load a model from disk
 def load_model( model_path, one_shot ):
     errw( "Loading model with prefix: " + model_path + "\n" )
-    errw( "\tLoading model architecture..." )
     
+    errw( "\tLoading model architecture..." )
     # read the model architecture from the json file
     model_arch = open( model_path + ".json" ).read()
-
-    if args.one_shot:
-        # change parameters so that certain layers are not trained.
-        model_arch = freeze_layers( model_arch )
-
     model = model_from_json( model_arch )
     errw( "Done!\n" )
 
+    if args.one_shot:
+        # change parameters so that certain layers are not trained.
+        freeze_network( model )
+    
     errw( "\tLoading model weights..." )
     model.load_weights( model_path + ".h5" )
     errw( "Done!\n" )
+
+    if args.one_shot:
+        # reset the weights of the last layer
+        nodes_to_reset = [ "classification" ]
+        reset_weights( model, nodes_to_reset )
 
     errw( "\tLoading amino acid index..." )
     aa_index = pickle.load( open( model_path + ".aa_index.p", "rb" ) )
@@ -443,42 +473,6 @@ def test_model( model, model_save_prefix, idx_to_codon, test_x, test_y, print_te
     errw( "Done!\n" )
     errw( "\tTest set accuracy: " + str( accuracy ) + "\n" )
 
-
-# This method will modify the model architecture json file so that it freezes the weights
-# for all the deep layers and leaves the last layer, the classification layer, available
-# for training
-def freeze_layers( model_arch ):
-    
-    # this only works for models that haven't been compiled yet, make pull request to 
-    # keras and see if we can change this
-    #for name, layer in model.nodes().iteritems():
-        # for legacy reasons we need to also check if it's "activation" or not, this can
-        # be removed in future versions once i'm only using newly trained models
-    #    if name != "classification" and name != "activation":
-    #        layer.trainable = False
-
-    # because you can't modifiy a compiled model, we'll modify the json string representation
-    # of the model by setting 'trainable' to false and also setting dropout_U and dropout_W
-    # to 0 so that the whole network is utilized.
-    import json
-    config = json.loads( model_arch )
-
-    for node in config[ "nodes" ]:
-        if node != "classification":
-            config[ "nodes" ][ node ][ "trainable" ] = False
-
-            # this is only necessary if the model was trained with dropout
-            # but we perofrm it for everyone anyways just to ensure the whole
-            # network is used during one-shot training
-            if "backwards" in node or "forwwards" in node:
-                config[ "nodes" ][ node ][ "dropout_U" ] = 0.0
-                config[ "nodes" ][ node ][ "dropout_W" ] = 0.0
-
-
-    errw( "Modified model for one-shot learning..." )
-    #errw( "Done!\n" )
-
-    return json.dumps( config )
 
 # TODO: implement
 # Classify a given file, output is written to a file with the same name

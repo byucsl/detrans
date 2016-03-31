@@ -78,6 +78,7 @@ networks/detrains_train.py --one_shot --load_model model_prefix args...
 ## Dependencies
 
 1. keras (https://github.com/fchollet/keras)
+  1. Make sure that you're running the newest version of keras (pip install git+git://github.com/fchollet/keras.git --upgrade --no-deps)
 1. theano (https://github.com/Theano/Theano)
 1. scikit-learn (https://github.com/scikit-learn/scikit-learn)
 1. h5py
@@ -89,11 +90,13 @@ networks/detrains_train.py --one_shot --load_model model_prefix args...
 The authors would like to thank the following individuals for their support in developing this project:
 
 1. BYU Deep-Learning Study Group
-    1. Christopher Tensmeyer
-    1. Logan Mitchell
     1. Mike Brodie
     1. Aaron Dennis
     1. Derrall Heath
+    1. Logan Mitchell
+    1. Christopher Tensmeyer
+1. Alexander Lemon
+1. BYU Computational Science Laboratory
 
 ## Contributors
 @masakistan (sfujimoto@gmail.com)
