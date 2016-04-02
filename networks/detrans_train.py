@@ -15,7 +15,7 @@ import sys, argparse, datetime, time, re, pickle
 import numpy as np
 from sklearn.utils import shuffle
 from keras.models import Graph, model_from_json
-from keras.layers.core import Merge, Activation, TimeDistributedDense
+from keras.layers.core import Activation, TimeDistributedDense, Lambda
 from keras.layers.recurrent import LSTM, GRU
 from keras.optimizers import SGD
 from keras.preprocessing.sequence import pad_sequences
@@ -44,6 +44,16 @@ codon_to_aa = {
     "GAT":"D", "GAC":"D", "GAA":"E", "GAG":"E",
     "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"
     }
+
+
+# Function courtesy of: https://github.com/fchollet/keras/pull/1674
+def reverse_func( x ):
+    import keras.backend as K
+    assert K.ndim(x) == 3, "Should be a 3D tensor."
+    rev = K.permute_dimensions(x, (1, 0, 2))[::-1]
+    return K.permute_dimensions(rev, (1, 0, 2))
+
+reverse = Lambda( reverse_func ) # Add this layer after your go backwards LSTM
 
 
 def read_raw_text( file_path ):
@@ -195,7 +205,7 @@ def load_model( model_path, one_shot ):
         # reset the weights of the last layer
         nodes_to_reset = [ "classification" ]
         reset_weights( model, nodes_to_reset )
-
+    
     errw( "\tLoading amino acid index..." )
     aa_index = pickle.load( open( model_path + ".aa_index.p", "rb" ) )
     errw( "Done!\n" )
@@ -275,9 +285,22 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                         dropout_W = drop_w,
                         dropout_U = drop_u
                         ),
-                    name = "backwards" + str( i ),
+                    name = "backwards_rnn" + str( i ),
                     input = prev_backwards_input
                     )
+
+            errw( "Adding reversing layer..." )
+            
+            # A special function needs to be added to reverse the output of a backwards
+            # layer when doing a bidirectional recurrent neural network
+            model.add_node(
+                    Lambda(
+                        reverse_func,
+                        ),
+                    name = "backwards" + str( i ),
+                    input = "backwards_rnn" + str( i )
+                    )
+
             errw( "Done!\n" )
     
     errw( "\tAdding dense layer on top of LSTM layers..." )
