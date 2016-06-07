@@ -14,13 +14,14 @@ modified by stanley fujimoto (masakistan)
 import sys, argparse, datetime, time, re, pickle
 import numpy as np
 from sklearn.utils import shuffle
-from keras.models import Graph, model_from_json
-from keras.layers.core import Activation, TimeDistributedDense, Lambda
-from keras.layers.recurrent import LSTM, GRU
-from keras.optimizers import SGD
-from keras.preprocessing.sequence import pad_sequences
-from keras.preprocessing.text import one_hot, text_to_word_sequence
-from keras.layers.embeddings import Embedding
+import tensorflow as tf
+#from keras.models import Graph, model_from_json
+#from keras.layers import Activation, TimeDistributed, Dense, Lambda, merge
+#from keras.layers import LSTM, GRU
+#from keras.optimizers import SGD
+#from keras.preprocessing.sequence import pad_sequences
+#from keras.preprocessing.text import one_hot, text_to_word_sequence
+#from keras.layers import Embedding
 
 sys.setrecursionlimit(10000)
 
@@ -44,16 +45,6 @@ codon_to_aa = {
     "GAT":"D", "GAC":"D", "GAA":"E", "GAG":"E",
     "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"
     }
-
-
-# Function courtesy of: https://github.com/fchollet/keras/pull/1674
-def reverse_func( x ):
-    import keras.backend as K
-    assert K.ndim(x) == 3, "Should be a 3D tensor."
-    rev = K.permute_dimensions(x, (1, 0, 2))[::-1]
-    return K.permute_dimensions(rev, (1, 0, 2))
-
-reverse = Lambda( reverse_func ) # Add this layer after your go backwards LSTM
 
 
 def read_raw_text( file_path ):
@@ -89,7 +80,7 @@ def seqs_to_indices( seqs, index ):
 
 
 def seqs_to_one_hot( maxlen, seqs, index ):
-    encodings = np.zeros( ( len( seqs ), maxlen, len( index ) ), np.bool )
+    encodings = np.zeros( ( len( seqs ), maxlen, len( index ) ), np.int )
     for sidx, seq in enumerate( seqs ):
         seq = seq.split()
         offset = maxlen - len( seq )
@@ -218,243 +209,179 @@ def load_model( model_path, one_shot ):
 
 
 # Build the deep BLSTM
-# we're going to do this using a graph structure instead of sequential
-# because it's easier to think about and do, sequential is weird :(
-def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cds_vocab_size, maxlen, forwards_only, node_type, drop_w, drop_u ):
-    errw( "Building model" )
-    
-    model = Graph()
+# Looks like tensorflow is the way to go! Maybe someday we can use keras, but not today.
+class brnn_model( object ):
 
-    errw( "\tAdding initial input layer..." )
-    model.add_input(
-            name = "input",
-            input_shape = ( maxlen, ),
-            dtype = int
-            )
-    errw( "Done!\n" )
+    def __init__( self, nb_layers, embedding_size, lstm_size, aa_vocab_size, cds_vocab_size, max_steps, drop_w, drop_u, session, batch_size, learning_rate = 0.1 ):
+        errw( "Building model" )
 
-    errw( "\tAdding embedding layer..." )
-    model.add_node( 
-            Embedding( 
-                aa_vocab_size,
-                nb_embedding_nodes,
-                mask_zero = True
-                ), 
-            name = "embedding",
-            input = "input"
-            )
-    errw( "Done!\n" )
+        self._x = tf.placeholder( tf.int32, [ batch_size, max_steps ], name = "x" )
+        self._y = tf.placeholder( tf.int32, [ batch_size, max_steps ], name = "y" )
+        self._mask = tf.placeholder( tf.bool, [ batch_size, max_steps ], name = "mask" )
 
-    # for each lstm layer add a layer to the model
-    prev_forwards_input = "embedding"
-    prev_backwards_input = "embedding"
-    for i in range( nb_layers ):
+        self._early_stop = tf.placeholder( tf.int64, [ batch_size ], name = "early_stop" )
 
-        # set up the correct input names for each layer
-        # if we're on the first iteration, the embedding layer is the
-        # input layer
-        # if we're past the first iteration it is previous lstm layer
-        # that is the input layer
-        if i > 0:
-            prev_forwards_input = "forwards" + str( i - 1 )
-            prev_backwards_input = "backwards" + str( i - 1 )
+        self.embedding = tf.get_variable( "embedding", [ aa_vocab_size, embedding_size ] )
+        self.inputs = tf.nn.embedding_lookup( self.embedding, self._x )
+        #self.inputs = [ tf.squeeze( input_, [ 1 ] ) for input_ in tf.split( 1, max_steps, self.inputs ) ]
 
-        errw( "\tCreating LSTM layer " + str( i + 1 ) + "\n" )
-        errw( "\t\tAdding forwards layer..." )
+        lstm_fw_cell = tf.nn.rnn_cell.BasicLSTMCell( lstm_size, forget_bias = 1.0 )
+        stacked_lstm_fw = tf.nn.rnn_cell.MultiRNNCell( [ lstm_fw_cell ] * nb_layers )
+        initial_state_fw = state_fw = stacked_lstm_fw.zero_state( batch_size, tf.float32 )
 
-        model.add_node(
-                node_type(
-                    nb_lstm_nodes,
-                    return_sequences = True,
-                    dropout_W = drop_w,
-                    dropout_U = drop_u
-                    ),
-                name = "forwards" + str( i ),
-                input = prev_forwards_input
+        lstm_bw_cell = tf.nn.rnn_cell.BasicLSTMCell( lstm_size, forget_bias = 1.0 )
+        stacked_lstm_bw = tf.nn.rnn_cell.MultiRNNCell( [ lstm_bw_cell ] * nb_layers )
+        initial_state_bw = state_bw = stacked_lstm_bw.zero_state( batch_size, tf.float32 )
+
+        biases = {
+            'out': tf.Variable( tf.random_normal( [ cds_vocab_size ] ) )
+        }
+
+        weights = {
+            'out': tf.Variable(tf.random_normal( [ lstm_size * 2, cds_vocab_size ] ) )
+        }
+
+        outputs = tf.nn.bidirectional_dynamic_rnn(
+                stacked_lstm_fw,
+                stacked_lstm_bw,
+                self.inputs,
+                initial_state_fw = initial_state_fw,
+                initial_state_bw = initial_state_bw,
+                sequence_length = self._early_stop,
+                dtype = tf.float32
                 )
-        errw( "Done!\n" )
-        
-        # if we're not doing a bidirectional lstm
-        if not forwards_only:
-            errw( "\t\tAdding backwards layer..." )
-            model.add_node(
-                    node_type(
-                        nb_lstm_nodes,
-                        return_sequences = True,
-                        go_backwards = True,
-                        dropout_W = drop_w,
-                        dropout_U = drop_u
-                        ),
-                    name = "backwards_rnn" + str( i ),
-                    input = prev_backwards_input
-                    )
 
-            errw( "Adding reversing layer..." )
-            
-            # A special function needs to be added to reverse the output of a backwards
-            # layer when doing a bidirectional recurrent neural network
-            model.add_node(
-                    Lambda(
-                        reverse_func,
-                        ),
-                    name = "backwards" + str( i ),
-                    input = "backwards_rnn" + str( i )
-                    )
+        states = outputs[ 0 ]
+        statesfw = outputs[ 1 ]
+        statesbw = outputs[ 2 ]
 
-            errw( "Done!\n" )
-    
-    errw( "\tAdding dense layer on top of LSTM layers..." )
+        reshaped_states = tf.reshape( states, [ -1, lstm_size * 2 ] )
+        prediction = tf.nn.softmax( tf.matmul( reshaped_states, weights[ 'out' ] ) + biases[ 'out' ] )
+        self._reshaped_prediction = tf.reshape( prediction, [ -1, max_steps, cds_vocab_size ] )
 
-    if not forwards_only:
-        last_inputs = [ "forwards" + str( i ),  "backwards" + str( i ) ]
+        #reshaped_y = tf.reshape( self._y, [ -1, cds_vocab_size ] )
+        onehot_y = tf.one_hot( self._y, cds_vocab_size, on_value = 1., off_value = 0. )
+        reshaped_y = tf.reshape( onehot_y, [ -1, cds_vocab_size ] )
 
-        model.add_node(
-                TimeDistributedDense(
-                    cds_vocab_size
-                    ),
-                name = "classification",
-                inputs = last_inputs
-                )
-    else:
-        last_input = "forwards" + str( i )
-        model.add_node(
-                TimeDistributedDense(
-                    cds_vocab_size
-                    ),
-                name = "classification",
-                input = last_input
-                )
-    errw( "Done!\n" )
+        self._fixed_prediction = tf.mul( prediction, reshaped_y )
 
-    errw( "\tAdding softmax layer..." )
-    model.add_node(
-            Activation(
-                "softmax"
-                ),
-            name = "activation",
-            input = "classification"
-            )
-    errw( "Done!\n" )
+        self._cost = tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits( self._fixed_prediction, reshaped_y ) ) # Softmax loss
+        self._train_op = tf.train.AdamOptimizer( learning_rate = learning_rate ).minimize( self._cost ) # Adam Optimizer
 
-    errw( "\tAdding final output node to graph..." )
-    model.add_output(
-            name = "output",
-            input = "activation"
-            )
-    errw( "Done!\n" )
+        #argmax_y = tf.argmax( reshaped_y, 1 )
+        self._prediction_argmax = tf.argmax( self._reshaped_prediction, 2 )
 
-    errw( "\tCompile constructed model..." )
+        self._correct_pred = tf.equal( tf.argmax( self._fixed_prediction, 1 ), tf.argmax( reshaped_y, 1 ) )
+        self._accuracy = tf.reduce_mean( tf.cast( self._correct_pred, tf.float32 ) )
 
-    # TODO: enable learning rate as a user defined setting
+        tvars = tf.trainable_variables()
+        # TODO: look at this?
+        #grads, _ = tf.clip_by_global_norm( tf.gradients( self._cost, tvars ), 10 )
+        #self._train_op = optimizer.apply_gradients( zip( grads, tvars ) )
 
-    model.compile(
-            loss = { "output" : "categorical_crossentropy" },
-            optimizer = "rmsprop"
-            )
-    errw( "Done!\n" )
+        self.session = session
 
-    return model
+    @property
+    def train_op( self ):
+        return self._train_op
+
+    @property
+    def cost( self ):
+        return self._cost
+
+    @property
+    def x( self ):
+        return self._x
+
+    @property
+    def y( self ):
+        return self._y
+
+    @property
+    def early_stop( self ):
+        return self._early_stop
+
+    @property
+    def accuracy( self ):
+        return self._accuracy
+
+    @property
+    def mask( self ):
+        return self._mask
+
+    @property
+    def pred_vals( self ):
+        return self._fixed_prediction
+
+    @property
+    def predictions( self ):
+        return self._reshaped_prediction
+
+    @property
+    def predictions_argmax( self ):
+        return self._prediction_argmax
 
 
-# Take the constructed model and train it using the data provided
-def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix, idx_to_codon, no_save ):
-    # TODO: comment this out
-    #validate_x = train_x
-    #validate_y = train_y
+    # Take the constructed model and train it using the data provided
+    # TODO:
+    # - DOES THIS EVEN WORK!?
 
-    # train the model
-    errw("Training...\n")
-
-    if verbosity > 0:
-        results = model.predict(
+    def run_epoch( self, train_x, train_y, seq_lengths, mask ):
+        # train the model
+        errw("Training...\n")
+        cost, _, acc, preds, preds_argmax = self.session.run(
+                [
+                    self.cost,
+                    self.train_op,
+                    self.accuracy,
+                    self.predictions,
+                    self.predictions_argmax
+                ],
                 {
-                    "input" : validate_x,
-                    "output" : validate_y
-                },
-                verbose = 0
+                    self.x : train_x,
+                    self.y : train_y,
+                    self.early_stop : seq_lengths,
+                    self.mask : mask
+                }
                 )
 
-        outputs = results[ "output" ]
-        acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
-        errw( "\tModel accuracy without any training: " + str( acc ) + "\n" )
-
-    for i in range( nb_epochs ):
-        if verbosity > 0:
-            errw( "\tTraining epoch: " + str( i + 1 ) + "/" + str( nb_epochs ) + "\n" )
-        model.fit(
-                {
-                    "input" : train_x,
-                    "output" : train_y,
-                },
-                nb_epoch = 1,
-                batch_size = 1,
-                verbose = verbosity,
-                #shuffle = False,
-                validation_data = {
-                    "input" : validate_x,
-                    "output" : validate_y
-                    }
-                )
+        return cost, acc, preds, preds_argmax
 
 
-        if verbosity > 0:
-            results = model.predict(
-                    {
-                        "input" : validate_x,
-                        "output" : validate_y
-                    },
-                    verbose = 0
-                    )
+    def get_accuracy( outputs, labels, idx_to_codon ):
+        gen_seqs = []
+        cor_seqs = []
+        correct = 0.
+        incorrect = 0.
 
-            outputs = results[ "output" ]
-            acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
-            errw( "\t\tval_acc: " + str( acc ) + "\n" )
+        for predicted, actual in zip( outputs, labels ):
+            gen_seq = ""
+            cor_seq = ""
+            for idx, pred in enumerate( predicted ):
+                codon_idx = np.argmax( pred )
+                codon_prob = np.amax( pred )
+                codon = idx_to_codon[ codon_idx ]
 
-            errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
+                cor_codon_idx = np.argmax( actual[ idx ] )
+                cor_codon = idx_to_codon[ cor_codon_idx ]
 
-        # save the model and its weights
-        if not no_save:
-            errw( "\t\tSaving model..." )
-            json_string = model.to_json()
-            open( model_save_prefix + ".json", 'w' ).write( json_string )
-            model.save_weights( model_save_prefix + ".h5", overwrite = True )
-            errw( "Done!\n" )
+                #errw( codon + "\t" + cor_codon + "\n" )
+                if cor_codon == "":
+                    continue
+                if cor_codon == codon:
+                    correct += 1.
+                else:
+                    incorrect += 1.
+                gen_seq += codon
+                cor_seq += cor_codon
+            #errw( gen_seq + "\n" )
+            #errw( cor_seq + "\n" )
 
+            gen_seqs.append( gen_seq )
+            cor_seqs.append( cor_seq )
 
-def get_accuracy( outputs, labels, idx_to_codon ):
-    gen_seqs = []
-    cor_seqs = []
-    correct = 0.
-    incorrect = 0.
-
-    for predicted, actual in zip( outputs, labels ):
-        gen_seq = ""
-        cor_seq = ""
-        for idx, pred in enumerate( predicted ):
-            codon_idx = np.argmax( pred )
-            codon_prob = np.amax( pred )
-            codon = idx_to_codon[ codon_idx ]
-
-            cor_codon_idx = np.argmax( actual[ idx ] )
-            cor_codon = idx_to_codon[ cor_codon_idx ]
-
-            #errw( codon + "\t" + cor_codon + "\n" )
-            if cor_codon == "":
-                continue
-            if cor_codon == codon:
-                correct += 1.
-            else:
-                incorrect += 1.
-            gen_seq += codon
-            cor_seq += cor_codon
-        #errw( gen_seq + "\n" )
-        #errw( cor_seq + "\n" )
-
-        gen_seqs.append( gen_seq )
-        cor_seqs.append( cor_seq )
-
-    accuracy = correct / ( correct + incorrect )
-    return accuracy, gen_seqs, cor_seqs
+        accuracy = correct / ( correct + incorrect )
+        return accuracy, gen_seqs, cor_seqs
 
 
 # Take a trained model and print out the accuracy on the test set
@@ -537,9 +464,9 @@ def main( args ):
         if args.gru:
             errw( "\tUsing GRU in the RNN\n" )
             node_type = GRU
-        else:
-            errw( "\tUsing LSTM in the RNN\n" )
-            node_type = LSTM
+        #else:
+        #    errw( "\tUsing LSTM in the RNN\n" )
+        #    node_type = LSTM
         if args.forwards_only:
             errw( "\tForwards only network (not bidirectional)\n" )
 
@@ -594,81 +521,117 @@ def main( args ):
     errw( "Codons vocab size: " + str( cds_vocab_size ) + "\n" )
     errw( "Maximum sequence length: " + str( max_seq_len ) + "\n" )
 
-    # check if we're loading a previously trained model
-    if args.load_model:
+    with tf.Graph().as_default(), tf.Session() as session:
+        # check if we're loading a previously trained model
+        if args.load_model:
 
-        # load in parameters and indices
-        model, t_aa_index, t_cds_index = load_model( args.load_model, args.one_shot )
+            # load in parameters and indices
+            model, t_aa_index, t_cds_index = load_model( args.load_model, args.one_shot )
+            
+            # Perform a check to make sure the loaded vocabulary from a previous run contains all words for the currently laoded dataset
+            if not set( aa_index.keys() ).issubset( set( t_aa_index.keys() ) ) or not set( cds_index.keys() ).issubset( set( t_cds_index.keys() ) ):
+                sys.exit( "ERROR: loaded amino acid index does not contain all words in the loaded traning set. Aborting!\n" )
+
+            # if tests pass then we need to overwrite the indices
+            aa_index = t_aa_index
+            cds_index = t_cds_index
+
+            # if we're doing one shot learning, we need to modify the loaded model so that only the last layer is trainable.
+        else:
+            # save the indices for loading models later
+            pickle.dump( aa_index, open( args.model_save_path + ".aa_index.p", "wb" ) )
+            pickle.dump( cds_index, open( args.model_save_path + ".cds_index.p", "wb" ) )
+
+            #model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only, node_type, args.dropout_w, args.dropout_u )
+            # TODO: fix this
+            batch_size = 20
+            m = brnn_model(
+                    args.hidden_layers,
+                    args.embedding_nodes,
+                    args.lstm_nodes,
+                    aa_vocab_size,
+                    cds_vocab_size,
+                    max_seq_len,
+                    args.dropout_w,
+                    args.dropout_u,
+                    session,
+                    batch_size
+                    )
         
-        # Perform a check to make sure the loaded vocabulary from a previous run contains all words for the currently laoded dataset
-        if not set( aa_index.keys() ).issubset( set( t_aa_index.keys() ) ) or not set( cds_index.keys() ).issubset( set( t_cds_index.keys() ) ):
-            sys.exit( "ERROR: loaded amino acid index does not contain all words in the loaded traning set. Aborting!\n" )
-
-        # if tests pass then we need to overwrite the indices
-        aa_index = t_aa_index
-        cds_index = t_cds_index
-
-        # if we're doing one shot learning, we need to modify the loaded model so that only the last layer is trainable.
-    else:
-        # save the indices for loading models later
-        pickle.dump( aa_index, open( args.model_save_path + ".aa_index.p", "wb" ) )
-        pickle.dump( cds_index, open( args.model_save_path + ".cds_index.p", "wb" ) )
-
-        model = build_model( args.hidden_layers, args.embedding_nodes, args.lstm_nodes, aa_vocab_size, cds_vocab_size, max_seq_len, args.forwards_only, node_type, args.dropout_w, args.dropout_u )
-
-
-    errw( "Shuffling data..." )
-    # randomize the data, using a seed if necessary
-    if args.seed:
-        errw( "using seed " + str( args.seed ) + "..." )
-        aa_seqs, cds_seqs = shuffle( aa_seqs, cds_seqs, random_state = args.seed )
-    else:
-        aa_seqs, cds_seqs = shuffle( aa_seqs, cds_seqs )
-    errw( "Done!\n" )
-
-    errw( "Total number of instances read: " + str( len( aa_seqs ) ) + "\n" )
-    if args.max_seqs > 0:
-        errw( "\tOnly using " + str( args.max_seqs ) + " sequences\n" )
-        aa_seqs = aa_seqs[ : args.max_seqs ]
-        cds_seqs = cds_seqs[ : args.max_seqs ]
+        tf.initialize_all_variables().run()
+        
     
-    cds_reverse_index = number_to_word( cds_index )
+        errw( "Shuffling data..." )
+        # randomize the data, using a seed if necessary
+        if args.seed:
+            errw( "using seed " + str( args.seed ) + "..." )
+            aa_seqs, cds_seqs = shuffle( aa_seqs, cds_seqs, random_state = args.seed )
+        else:
+            aa_seqs, cds_seqs = shuffle( aa_seqs, cds_seqs )
+        errw( "Done!\n" )
 
-    # prepare text for model training
-    errw( "Prepare sequences for input into learning algorithms\n" )
-    
-    errw( "\tConvert amino acid sequences..." )
-    aa_seqs = seqs_to_indices( aa_seqs, aa_index )
-    errw( "Done!\n" )
-    
-    errw( "\tPad amino acid sequences..." )
-    aa_seqs = pad_sequences( aa_seqs, maxlen = max_seq_len )
-    errw( "Done!\n" )
-    
-    errw( "\tOne-hot encode codon sequences..." )
-    cds_seqs = seqs_to_one_hot( max_seq_len, cds_seqs, cds_index )
-    errw( "Done!\n" )
+        errw( "Total number of instances read: " + str( len( aa_seqs ) ) + "\n" )
+        if args.max_seqs > 0:
+            errw( "\tOnly using " + str( args.max_seqs ) + " sequences\n" )
+            aa_seqs = aa_seqs[ : args.max_seqs ]
+            cds_seqs = cds_seqs[ : args.max_seqs ]
+        
+        cds_reverse_index = number_to_word( cds_index )
 
-    # split the data into train, validation, and test data
-    train_x, train_y, test_x, test_y, validate_x, validate_y = split_train_test_validate( args.training_split, aa_seqs, cds_seqs, )
+        # prepare text for model training
+        errw( "Prepare sequences for input into learning algorithms\n" )
+        
+        errw( "\tConvert amino acid sequences..." )
+        aa_seqs = seqs_to_indices( aa_seqs, aa_index )
+        errw( "Done!\n" )
+        
+        errw( "\tPad amino acid sequences..." )
+        seq_lengths = np.array( [ len( x ) for x in aa_seqs ] )
+        aa_seqs = [ _seq + [ 0 ] * ( max_seq_len - len( _seq ) ) for _seq in aa_seqs ]
+        #aa_seqs = pad_sequences( aa_seqs, maxlen = max_seq_len )
+        errw( "Done!\n" )
 
-    errw( "Total instances: " + str( len( aa_seqs ) ) + "\n" )
-    errw( "\tTrain instances:    " + str( len( train_x ) ) + "\n" )
-    errw( "\tTest instances:     " + str( len( test_x ) )  + "\n" )
-    errw( "\tValidate instances: " + str( len( validate_x ) ) + "\n" )
+        mask = [ [ True ] * _slen + [ False ] * ( max_seq_len - _slen ) for _slen in seq_lengths ]
+        #print mask
+        
+        errw( "\tOne-hot encode codon sequences..." )
+        #cds_seqs = seqs_to_one_hot( max_seq_len, cds_seqs, cds_index )
+        cds_seqs = seqs_to_indices( cds_seqs, cds_index )
+        cds_seqs = [ _seq + [ 0 ] * ( max_seq_len - len( _seq ) ) for _seq in cds_seqs ]
+        errw( "Done!\n" )
+
+        # split the data into train, validation, and test data
+        train_x, train_y, test_x, test_y, validate_x, validate_y = split_train_test_validate( args.training_split, aa_seqs, cds_seqs, )
+
+        errw( "Total instances: " + str( len( aa_seqs ) ) + "\n" )
+        errw( "\tTrain instances:    " + str( len( train_x ) ) + "\n" )
+        errw( "\tTest instances:     " + str( len( test_x ) )  + "\n" )
+        errw( "\tValidate instances: " + str( len( validate_x ) ) + "\n" )
 
 
-    # train the model
-    # TODO: comment this out
-    #validate_x = train_x
-    #validate_y = train_y
-    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index, args.no_save )
+        # train the model
+        # TODO: comment this out
+        #validate_x = train_x
+        #validate_y = train_y
+        #train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index, args.no_save )
+        #print train_x[ : batch_size ]
+        #print train_y[ : batch_size ]
+        #print seq_lengths[ : batch_size ]
+        print cds_index
+        for i in range( 100 ):
+            cost, acc, preds, preds_argmax = m.run_epoch( np.array( train_x[ : batch_size ] ), np.array( train_y[ : batch_size ] ), seq_lengths[ : batch_size ], mask[ : batch_size ] )
+            print "cost:", cost, "\t", "acc:", acc
+            #print preds[ 0 ]
+            print " ".join( map( str, preds_argmax[ 0 ] ) )[ : seq_lengths[ 0 ] ]
 
-    # run model on test dataset and print accuracy
-    # TODO: comment this out
-    #test_x = train_x
-    #test_y = train_y
-    test_model( model, args.model_save_path, cds_reverse_index, test_x, test_y, args.print_test_seqs )
+            acc = calc_acc( preds_argmax, cds_seqs[ : batch_size ], mask )
+            print acc
+
+        # run model on test dataset and print accuracy
+        # TODO: comment this out
+        #test_x = train_x
+        #test_y = train_y
+        #test_model( model, args.model_save_path, cds_reverse_index, test_x, test_y, args.print_test_seqs )
 
     # check if we need to classify another external file
     # classify if we need to and output the results to a file
@@ -680,6 +643,22 @@ def main( args ):
 
     errw( "End date/time: " + str( datetime.datetime.now() ) + "\n" )
     print_runtime( start, end )
+
+
+def calc_acc( preds, labels, mask ):
+    cor = 0
+    err = 0
+    for sidx, pair in enumerate( zip( preds, labels ) ):
+        for pidx, mask_val in enumerate( mask[ sidx ] ):
+            if mask_val:
+                if pair[ 0 ][ pidx ] == pair[ 1 ][ pidx ]:
+                    cor += 1
+                else:
+                    err += 1
+            else:
+                break
+    return float( cor ) / ( cor + err )
+
 
 
 def print_runtime( start, end ):

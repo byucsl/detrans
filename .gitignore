@@ -4,3 +4,5 @@ networks/*.h5
 networks/*.txt
 networks/*.p
 networks/test/*
+model*
+test/*
