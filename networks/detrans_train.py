@@ -15,12 +15,12 @@ import sys, argparse, datetime, time, re, pickle
 import numpy as np
 from sklearn.utils import shuffle
 from keras.models import Graph, model_from_json
-from keras.layers.core import Activation, TimeDistributedDense, Lambda
-from keras.layers.recurrent import LSTM, GRU
+from keras.layers import Lambda, Input, merge, TimeDistributed, Dense, Embedding
+from keras.layers import LSTM, GRU
+from keras.models import Model
 from keras.optimizers import SGD
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
-from keras.layers.embeddings import Embedding
 
 sys.setrecursionlimit(10000)
 
@@ -89,19 +89,19 @@ def seqs_to_indices( seqs, index ):
 
 
 def seqs_to_one_hot( maxlen, seqs, index ):
-    encodings = np.zeros( ( len( seqs ), maxlen, len( index ) ), np.bool )
+    encodings = np.zeros( ( len( seqs ), maxlen, len( index ) ), np.int )
     for sidx, seq in enumerate( seqs ):
         seq = seq.split()
-        offset = maxlen - len( seq )
+        #offset = maxlen - len( seq )
 
         for cidx, codon in enumerate( seq ):
             try:
-                encodings[ sidx ][ offset + cidx ][ index[ codon ] ] = 1
+                encodings[ sidx ][ cidx ][ index[ codon ] ] = 1
             except KeyError:
                 # This should only happen if the pretrained network didn't have all the
                 # codons that are being used in later training. This should be fixed
                 # in current releases.
-                encodings[ sidx ][ offset + cidx ][ 0 ] = 1
+                encodings[ sidx ][ cidx ][ 0 ] = 1
     return encodings
 
 
@@ -218,138 +218,66 @@ def load_model( model_path, one_shot ):
 
 
 # Build the deep BLSTM
-# we're going to do this using a graph structure instead of sequential
-# because it's easier to think about and do, sequential is weird :(
+# we'll use the keras functional API because Graph has been deprecated and sequential
+# is something...?
 def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cds_vocab_size, maxlen, forwards_only, node_type, drop_w, drop_u ):
     errw( "Building model" )
-    
-    model = Graph()
 
+    # inputs
     errw( "\tAdding initial input layer..." )
-    model.add_input(
-            name = "input",
-            input_shape = ( maxlen, ),
-            dtype = int
-            )
+    inputs = Input( shape = ( maxlen, ), dtype = "int32" )
     errw( "Done!\n" )
-
+    
     errw( "\tAdding embedding layer..." )
-    model.add_node( 
-            Embedding( 
-                aa_vocab_size,
-                nb_embedding_nodes,
-                mask_zero = True
-                ), 
-            name = "embedding",
-            input = "input"
-            )
+    embedding = Embedding( aa_vocab_size, nb_embedding_nodes, mask_zero = True )( inputs )
     errw( "Done!\n" )
 
     # for each lstm layer add a layer to the model
-    prev_forwards_input = "embedding"
-    prev_backwards_input = "embedding"
     for i in range( nb_layers ):
-
-        # set up the correct input names for each layer
-        # if we're on the first iteration, the embedding layer is the
-        # input layer
-        # if we're past the first iteration it is previous lstm layer
-        # that is the input layer
-        if i > 0:
-            prev_forwards_input = "forwards" + str( i - 1 )
-            prev_backwards_input = "backwards" + str( i - 1 )
-
-        errw( "\tCreating LSTM layer " + str( i + 1 ) + "\n" )
-        errw( "\t\tAdding forwards layer..." )
-
-        model.add_node(
-                node_type(
+        if i == 0:
+            rnn_fwd = LSTM(
+                    nb_lstm_nodes,
+                    return_sequences = True
+                    )( embedding )
+            rnn_bwd = LSTM(
                     nb_lstm_nodes,
                     return_sequences = True,
-                    dropout_W = drop_w,
-                    dropout_U = drop_u
-                    ),
-                name = "forwards" + str( i ),
-                input = prev_forwards_input
-                )
-        errw( "Done!\n" )
-        
-        # if we're not doing a bidirectional lstm
-        if not forwards_only:
-            errw( "\t\tAdding backwards layer..." )
-            model.add_node(
-                    node_type(
-                        nb_lstm_nodes,
-                        return_sequences = True,
-                        go_backwards = True,
-                        dropout_W = drop_w,
-                        dropout_U = drop_u
-                        ),
-                    name = "backwards_rnn" + str( i ),
-                    input = prev_backwards_input
-                    )
-
-            errw( "Adding reversing layer..." )
-            
-            # A special function needs to be added to reverse the output of a backwards
-            # layer when doing a bidirectional recurrent neural network
-            model.add_node(
-                    Lambda(
-                        reverse_func,
-                        ),
-                    name = "backwards" + str( i ),
-                    input = "backwards_rnn" + str( i )
-                    )
-
-            errw( "Done!\n" )
+                    go_backwards = True
+                    )( embedding )
+        else:
+            rnn_fwd = LSTM(
+                    nb_lstm_nodes,
+                    return_sequences = True
+                    )( rnn_fwd )
+            rnn_bwd = LSTM(
+                    nb_lstm_nodes,
+                    return_sequences = True
+                    )( rnn_bwd )
     
+    errw( "\tAdding reverse layer..." )
+    reverse_layer = Lambda( lambda x: x[ :, :: -1, : ] )( rnn_bwd )
+    errw( "Done!\n" )
+
+    errw( "\tAdding merge layer...")
+    merge_layer = merge( [ rnn_fwd, reverse_layer ], mode = "concat" )
+    errw( "Done!\n" )
+
     errw( "\tAdding dense layer on top of LSTM layers..." )
-
-    if not forwards_only:
-        last_inputs = [ "forwards" + str( i ),  "backwards" + str( i ) ]
-
-        model.add_node(
-                TimeDistributedDense(
-                    cds_vocab_size
-                    ),
-                name = "classification",
-                inputs = last_inputs
+    predictions = TimeDistributed(
+            Dense(
+                cds_vocab_size,
+                activation = "softmax"
                 )
-    else:
-        last_input = "forwards" + str( i )
-        model.add_node(
-                TimeDistributedDense(
-                    cds_vocab_size
-                    ),
-                name = "classification",
-                input = last_input
-                )
+            )( merge_layer )
     errw( "Done!\n" )
 
-    errw( "\tAdding softmax layer..." )
-    model.add_node(
-            Activation(
-                "softmax"
-                ),
-            name = "activation",
-            input = "classification"
-            )
-    errw( "Done!\n" )
-
-    errw( "\tAdding final output node to graph..." )
-    model.add_output(
-            name = "output",
-            input = "activation"
-            )
-    errw( "Done!\n" )
+    model = Model( input = inputs, output = predictions )
 
     errw( "\tCompile constructed model..." )
-
-    # TODO: enable learning rate as a user defined setting
-
     model.compile(
-            loss = { "output" : "categorical_crossentropy" },
-            optimizer = "rmsprop"
+            loss = "categorical_crossentropy",
+            optimizer = "rmsprop",
+            metrics = [ "accuracy" ]
             )
     errw( "Done!\n" )
 
@@ -358,67 +286,43 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
 
 # Take the constructed model and train it using the data provided
 def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix, idx_to_codon, no_save ):
-    # TODO: comment this out
-    #validate_x = train_x
-    #validate_y = train_y
-
+    print train_x[ 0 ][ 0 ]
+    print train_y[ 0 ][ 0 ]
+    #print "train_x shape:", train_x.shape
+    #print "train_y shape:", train_y.shape
+        
     # train the model
     errw("Training...\n")
-
-    if verbosity > 0:
-        results = model.predict(
-                {
-                    "input" : validate_x,
-                    "output" : validate_y
-                },
-                verbose = 0
-                )
-
-        outputs = results[ "output" ]
-        acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
-        errw( "\tModel accuracy without any training: " + str( acc ) + "\n" )
 
     for i in range( nb_epochs ):
         if verbosity > 0:
             errw( "\tTraining epoch: " + str( i + 1 ) + "/" + str( nb_epochs ) + "\n" )
         model.fit(
-                {
-                    "input" : train_x,
-                    "output" : train_y,
-                },
+                train_x,
+                train_y,
                 nb_epoch = 1,
-                batch_size = 1,
                 verbose = verbosity,
-                #shuffle = False,
-                validation_data = {
-                    "input" : validate_x,
-                    "output" : validate_y
-                    }
+                validation_data = ( validate_x, validate_y )
                 )
+        #results = model.predict( validate_x )
+        results = model.predict( validate_x )
+        print results.shape
+       
+        counter = 0
+        for time_step in zip( validate_y[ 0 ], results[ 0 ] ):
+            if not np.any( time_step[ 0 ] ):
+                break
+            if counter > 10:
+                break
+            predicted = np.argmax( time_step[ 1 ] )
+            true_value =  np.argmax( time_step[ 0 ] )
+            print predicted, "\t", idx_to_codon[ predicted ], "\t", true_value, "\t", idx_to_codon[ true_value ], "\t", time_step[ 1 ][ predicted ]
+            counter += 1
 
+        #acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
+        #errw( "\t\tval_acc: " + str( acc ) + "\n" )
 
-        if verbosity > 0:
-            results = model.predict(
-                    {
-                        "input" : validate_x,
-                        "output" : validate_y
-                    },
-                    verbose = 0
-                    )
-
-            outputs = results[ "output" ]
-            acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
-            errw( "\t\tval_acc: " + str( acc ) + "\n" )
-
-            errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
-
-        # save the model and its weights
-        if not no_save:
-            errw( "\t\tSaving model..." )
-            json_string = model.to_json()
-            open( model_save_prefix + ".json", 'w' ).write( json_string )
-            model.save_weights( model_save_prefix + ".h5", overwrite = True )
-            errw( "Done!\n" )
+        errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
 
 
 def get_accuracy( outputs, labels, idx_to_codon ):
@@ -608,7 +512,7 @@ def main( args ):
         aa_index = t_aa_index
         cds_index = t_cds_index
 
-        # if we're doing one shot learning, we need to modify the loaded model so that only the last layer is trainable.
+        # if we're doing one shot learning, we need to modify the loaded model so that only the last layer is trainable.[ 0 ]
     else:
         # save the indices for loading models later
         pickle.dump( aa_index, open( args.model_save_path + ".aa_index.p", "wb" ) )
@@ -631,7 +535,7 @@ def main( args ):
         errw( "\tOnly using " + str( args.max_seqs ) + " sequences\n" )
         aa_seqs = aa_seqs[ : args.max_seqs ]
         cds_seqs = cds_seqs[ : args.max_seqs ]
-    
+   
     cds_reverse_index = number_to_word( cds_index )
 
     # prepare text for model training
@@ -642,7 +546,9 @@ def main( args ):
     errw( "Done!\n" )
     
     errw( "\tPad amino acid sequences..." )
-    aa_seqs = pad_sequences( aa_seqs, maxlen = max_seq_len )
+    # our convention for padding is to have padding on the right of the sequence,
+    # this is reflected in the seqs_to_one_hot function
+    aa_seqs = pad_sequences( aa_seqs, maxlen = max_seq_len, padding = 'post' )
     errw( "Done!\n" )
     
     errw( "\tOne-hot encode codon sequences..." )
@@ -657,18 +563,15 @@ def main( args ):
     errw( "\tTest instances:     " + str( len( test_x ) )  + "\n" )
     errw( "\tValidate instances: " + str( len( validate_x ) ) + "\n" )
 
+    #print validate_x[ 0 ]
+    #print validate_y[ 0 ]
+    #print cds_seqs
 
     # train the model
-    # TODO: comment this out
-    #validate_x = train_x
-    #validate_y = train_y
     train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index, args.no_save )
 
     # run model on test dataset and print accuracy
-    # TODO: comment this out
-    #test_x = train_x
-    #test_y = train_y
-    test_model( model, args.model_save_path, cds_reverse_index, test_x, test_y, args.print_test_seqs )
+    #test_model( model, args.model_save_path, cds_reverse_index, test_x, test_y, args.print_test_seqs )
 
     # check if we need to classify another external file
     # classify if we need to and output the results to a file
