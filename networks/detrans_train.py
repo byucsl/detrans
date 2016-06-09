@@ -277,7 +277,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
     model.compile(
             loss = "categorical_crossentropy",
             optimizer = "rmsprop",
-            metrics = [ "accuracy" ]
+            metrics = [ "categorical_accuracy" ]
             )
     errw( "Done!\n" )
 
@@ -286,13 +286,15 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
 
 # Take the constructed model and train it using the data provided
 def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix, idx_to_codon, no_save ):
-    print train_x[ 0 ][ 0 ]
-    print train_y[ 0 ][ 0 ]
+    #print train_x[ 0 ][ 0 ]
+    #print train_y[ 0 ][ 0 ]
     #print "train_x shape:", train_x.shape
     #print "train_y shape:", train_y.shape
         
     # train the model
     errw("Training...\n")
+    
+    validate_y_labels = np.argmax( validate_y, axis = 1 )
 
     for i in range( nb_epochs ):
         if verbosity > 0:
@@ -304,23 +306,18 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
                 verbose = verbosity,
                 validation_data = ( validate_x, validate_y )
                 )
-        #results = model.predict( validate_x )
-        results = model.predict( validate_x )
-        print results.shape
-       
-        counter = 0
-        for time_step in zip( validate_y[ 0 ], results[ 0 ] ):
-            if not np.any( time_step[ 0 ] ):
-                break
-            if counter > 10:
-                break
-            predicted = np.argmax( time_step[ 1 ] )
-            true_value =  np.argmax( time_step[ 0 ] )
-            print predicted, "\t", idx_to_codon[ predicted ], "\t", true_value, "\t", idx_to_codon[ true_value ], "\t", time_step[ 1 ][ predicted ]
-            counter += 1
+        
+        # I made sure to validate that categorical_accuracy works with masking, it does!
+        # So, we don't need custom categorical accuracy calculation code.
+        # TODO: Show amino acid codon prediction accuracy, even if the specific codon chosen is incorrect
 
-        #acc, gen_seqs, cor_seqs = get_accuracy( outputs, validate_y, idx_to_codon )
-        #errw( "\t\tval_acc: " + str( acc ) + "\n" )
+        # Save the model
+        if not no_save:
+            errw( "\t\tSaving model..." )
+            json_string = model.to_json()
+            open( model_save_prefix + ".json", 'w' ).write( json_string )
+            model.save_weights( model_save_prefix + ".h5", overwrite = True )
+            errw( "Done!\n" ) 
 
         errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
 
