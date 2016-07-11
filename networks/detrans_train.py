@@ -14,11 +14,9 @@ modified by stanley fujimoto (masakistan)
 import sys, argparse, datetime, time, re, pickle
 import numpy as np
 from sklearn.utils import shuffle
-from keras.models import Graph, model_from_json
+from keras.models import model_from_json, Model
 from keras.layers import Lambda, Input, merge, TimeDistributed, Dense, Embedding
 from keras.layers import LSTM, GRU
-from keras.models import Model
-from keras.optimizers import SGD
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
 
@@ -304,12 +302,47 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
                 train_y,
                 nb_epoch = 1,
                 verbose = verbosity,
-                validation_data = ( validate_x, validate_y )
+                validation_data = ( validate_x, validate_y ),
+                batch_size = 128
                 )
         
         # I made sure to validate that categorical_accuracy works with masking, it does!
         # So, we don't need custom categorical accuracy calculation code.
         # TODO: Show amino acid codon prediction accuracy, even if the specific codon chosen is incorrect
+
+        predictions = model.predict( validate_x )
+        counter = 0
+        cor_cds = 0
+        err_cds = 0
+        cor_aa = 0
+        err_aa = 0
+        for pred_val, true_val in zip( predictions[ 0 ], validate_y[ 0 ] ):
+            pred_lab = np.argmax( pred_val )
+            true_lab = np.argmax( true_val )
+            
+            if true_lab == 0:
+                break
+
+            print true_lab, "\t", idx_to_codon[ true_lab ], "\t", pred_lab, "\t", idx_to_codon[ pred_lab ], "\t", pred_val[ pred_lab ], "\t", True if true_lab == pred_lab else False
+
+            if true_lab == pred_lab:
+                cor_cds += 1
+            else:
+                err_cds += 1
+            
+            true_codon = idx_to_codon[ true_lab ]
+            pred_codon = idx_to_codon[ pred_lab ]
+            if codon_to_aa[ true_codon ] == codon_to_aa[ pred_codon ]:
+                cor_aa += 1
+            else:
+                err_aa += 1
+           
+            #if counter > 10:
+            #    break
+            counter += 1
+       
+        print "cds acc:\t", str( float( cor_cds ) / ( cor_cds + err_cds ) )
+        print "aa acc:\t", str( float( cor_aa ) / ( cor_aa + err_aa ) )
 
         # Save the model
         if not no_save:
@@ -317,7 +350,7 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
             json_string = model.to_json()
             open( model_save_prefix + ".json", 'w' ).write( json_string )
             model.save_weights( model_save_prefix + ".h5", overwrite = True )
-            errw( "Done!\n" ) 
+            errw( "Done!\n" )
 
         errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
 

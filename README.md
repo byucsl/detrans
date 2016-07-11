@@ -90,6 +90,7 @@ networks/detrains_train.py --one_shot --load_model model_prefix args...
 The authors would like to thank the following individuals for their support in developing this project:
 
 1. BYU Deep-Learning Study Group
+    1. Paul Bodily
     1. Mike Brodie
     1. Aaron Dennis
     1. Derrall Heath
