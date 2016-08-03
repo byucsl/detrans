@@ -14,6 +14,7 @@ modified by stanley fujimoto (masakistan)
 import sys, argparse, datetime, time, re, pickle
 import numpy as np
 from sklearn.utils import shuffle
+from keras.engine.topology import Layer
 from keras.models import model_from_json, Model
 from keras.layers import Lambda, Input, merge, TimeDistributed, Dense, Embedding
 from keras.layers import LSTM, GRU
@@ -52,6 +53,20 @@ def reverse_func( x ):
     return K.permute_dimensions(rev, (1, 0, 2))
 
 reverse = Lambda( reverse_func ) # Add this layer after your go backwards LSTM
+
+
+class BrnnAlign( Layer ):
+    #def __init__(self, func, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
+        #self.func = func
+        self.supports_masking = True
+        super( BrnnAlign, self ).__init__( *args, **kwargs )
+
+    def compute_mask( self, x, mask = None ):
+        return mask[ :: -1 ]
+
+    def call( self, x, mask = None ):
+        return x[ :, :: -1, : ]
 
 
 def read_raw_text( file_path ):
@@ -223,7 +238,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
 
     # inputs
     errw( "\tAdding initial input layer..." )
-    inputs = Input( shape = ( maxlen, ), dtype = "int32" )
+    inputs = Input( batch_shape = ( 32, maxlen ), dtype = "int32" )
     errw( "Done!\n" )
     
     errw( "\tAdding embedding layer..." )
@@ -253,7 +268,8 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                     )( rnn_bwd )
     
     errw( "\tAdding reverse layer..." )
-    reverse_layer = Lambda( lambda x: x[ :, :: -1, : ] )( rnn_bwd )
+    #reverse_layer = Lambda( lambda x: x[ :, :: -1, : ] )( rnn_bwd )
+    reverse_layer = BrnnAlign()( rnn_bwd )
     errw( "Done!\n" )
 
     errw( "\tAdding merge layer...")
@@ -274,7 +290,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
     errw( "\tCompile constructed model..." )
     model.compile(
             loss = "categorical_crossentropy",
-            optimizer = "rmsprop",
+            optimizer = "adam",
             metrics = [ "categorical_accuracy" ]
             )
     errw( "Done!\n" )
@@ -288,7 +304,7 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
     #print train_y[ 0 ][ 0 ]
     #print "train_x shape:", train_x.shape
     #print "train_y shape:", train_y.shape
-        
+    
     # train the model
     errw("Training...\n")
     
@@ -297,13 +313,14 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
     for i in range( nb_epochs ):
         if verbosity > 0:
             errw( "\tTraining epoch: " + str( i + 1 ) + "/" + str( nb_epochs ) + "\n" )
+        
         model.fit(
                 train_x,
                 train_y,
                 nb_epoch = 1,
                 verbose = verbosity,
                 validation_data = ( validate_x, validate_y ),
-                batch_size = 128
+                batch_size = 32
                 )
         
         # I made sure to validate that categorical_accuracy works with masking, it does!

@@ -31,7 +31,7 @@ def parse_and_print( input_file, output_file, word_size, overlap ):
                 else:
                     seq += line.strip()
             formatted_str = split_string_into_words( seq, word_size, overlap )
-            fh_out.write( formatted_str )
+            fh_out.write( formatted_str + '\n' )
             if len( formatted_str ) > 0:
                 counter += 1
     sys.stderr.write( "\tRead/Wrote " + str( counter ) + " seqs.\n" )

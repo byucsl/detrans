@@ -37,9 +37,13 @@ codon_to_aa = {"TTT":"F", "TTC":"F", "TTA":"L", "TTG":"L",
 def translate( seq ):
     translated_seq = ""
     codons = [ seq[ i : i + 3 ] for i in range( 0, len( seq ), 3 ) ]
-    for idx, codon in enumerate( [ seq[ i : i + 3 ] for i in range( 0, len( seq ), 3 ) ] ):
+    for idx, codon in enumerate( codons):
         try:
-            translated_seq += codon_to_aa[ codon ]
+            if codon == 'TGA' and idx != len( codons ) - 1:
+                to_add = 'U'
+            else:
+                to_add = codon_to_aa[ codon ]
+            translated_seq += to_add
         except KeyError:
             return ""
     return translated_seq
