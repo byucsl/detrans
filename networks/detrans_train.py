@@ -328,38 +328,10 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
         # TODO: Show amino acid codon prediction accuracy, even if the specific codon chosen is incorrect
 
         predictions = model.predict( validate_x )
-        counter = 0
-        cor_cds = 0
-        err_cds = 0
-        cor_aa = 0
-        err_aa = 0
-        for pred_val, true_val in zip( predictions[ 0 ], validate_y[ 0 ] ):
-            pred_lab = np.argmax( pred_val )
-            true_lab = np.argmax( true_val )
-            
-            if true_lab == 0:
-                break
 
-            print true_lab, "\t", idx_to_codon[ true_lab ], "\t", pred_lab, "\t", idx_to_codon[ pred_lab ], "\t", pred_val[ pred_lab ], "\t", True if true_lab == pred_lab else False
-
-            if true_lab == pred_lab:
-                cor_cds += 1
-            else:
-                err_cds += 1
-            
-            true_codon = idx_to_codon[ true_lab ]
-            pred_codon = idx_to_codon[ pred_lab ]
-            if codon_to_aa[ true_codon ] == codon_to_aa[ pred_codon ]:
-                cor_aa += 1
-            else:
-                err_aa += 1
-           
-            #if counter > 10:
-            #    break
-            counter += 1
-       
-        print "cds acc:\t", str( float( cor_cds ) / ( cor_cds + err_cds ) )
-        print "aa acc:\t", str( float( cor_aa ) / ( cor_aa + err_aa ) )
+        accuracy = calc_category_accuracy( predictions, validate_y, idx_to_codon )
+        errw( "\t\taa acc: \t" + str( accuracy[ 0 ] ) + "\n" )
+        errw( "\t\tcds acc:\t" + str( accuracy[ 1 ] ) + "\n" )
 
         # Save the model
         if not no_save:
@@ -371,6 +343,42 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
 
         errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
 
+
+def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
+    counter = 0
+    cor_cds = 0
+    err_cds = 0
+    cor_aa = 0
+    err_aa = 0
+
+    for seq_predictions, seq_labels in zip( all_predictions, all_labels ):
+        for pred_val, true_val in zip( seq_predictions, seq_labels ):
+            pred_lab = np.argmax( pred_val )
+            true_lab = np.argmax( true_val )
+    
+            if true_lab == 0:
+                break
+
+            if true_lab == pred_lab:
+                cor_cds += 1
+            else:
+                err_cds += 1
+            
+            # fix this to account for the amino acid U
+            true_codon = idx_to_codon[ true_lab ]
+            pred_codon = idx_to_codon[ pred_lab ]
+
+            if codon_to_aa[ true_codon ] == codon_to_aa[ pred_codon ]:
+                cor_aa += 1
+            else:
+                err_aa += 1
+           
+            counter += 1
+
+    # this will return the following values to measure accuracy:
+    # ( amino acid accuracy, codon accuracy )
+    return ( float( cor_aa ) / ( cor_aa + err_aa ), float( cor_cds ) / ( cor_cds + err_cds ) )
+       
 
 def get_accuracy( outputs, labels, idx_to_codon ):
     gen_seqs = []
@@ -630,6 +638,8 @@ def main( args ):
 
     errw( "End date/time: " + str( datetime.datetime.now() ) + "\n" )
     print_runtime( start, end )
+
+    errw( "Done!\n" )
 
 
 def print_runtime( start, end ):
