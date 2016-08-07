@@ -17,10 +17,16 @@ def read_accessions( file_path ):
 
     return ids
 
-def request_cds( org_id, email ):
+def request_seqs( org_id, email, seq_type ):
     Entrez.email = email
-    handle = Entrez.efetch(db="nuccore", id=org_id, rettype="fasta_cds_na", retmode="text")
+
+    if seq_type == 'cds':
+        handle = Entrez.efetch(db="nuccore", id=org_id, rettype="fasta_cds_na", retmode="text")
+    else:
+        handle = Entrez.efetch(db="nuccore", id=org_id, rettype="fasta_cds_aa", retmode="text")
     text = handle.read()
+    handle.close()
+    
     return text
 
 def write( path, text ):
@@ -30,23 +36,23 @@ def write( path, text ):
 def query( ):
     pass
 
-def make_queries( output_dir, email, ids, retry ):
+def make_queries( output_dir, email, ids, retry, seq_type ):
     for id in ids:
         sys.stderr.write( "\tQuerying " + id + " ... " )
         
         
-        path_cds = output_dir + "/" + id + ".cds.fasta"
+        path_cds = output_dir + "/" + id + "." + seq_type + ".fasta"
         start = time.time()
         if retry:
             if not os.path.isfile( path_cds ):
-                fasta_cds = request_cds( id, email )
+                fasta_cds = request_seqs( id, email, seq_type )
                 write( path_cds, fasta_cds )
                 sys.stderr.write( "Done!" )
             else:
                 sys.stderr.write( "File already exists! Skipping." )
                          
         else:
-            fasta_cds = request_cds( id, email )
+            fasta_cds = request_seqs( id, email, seq_type )
             write( path_cds, fasta_cds )
             sys.stderr.write( "Done!" )
 
@@ -63,7 +69,7 @@ def main( args ):
     sys.stderr.write( "\tRead " + str( len( ids ) ) + " ids.\n" )
 
     sys.stderr.write( "Making entrez queries...\n" )
-    make_queries( args.output_dir, args.email, ids, args.retry )
+    make_queries( args.output_dir, args.email, ids, args.retry, args.seq_type )
     sys.stderr.write( "Finished!\n" )
 
 
@@ -87,7 +93,13 @@ if __name__ == "__main__":
             action = 'store_true',
             help = "Try redownloading starting from where you last left off."
             )
-    parser.set_defaults( retry = False )
+    parser.add_argument( '--seq_type',
+            type = str,
+            help = "Download nucleotide CDS or amino acid sequences. Options are: 'cds' or 'aa'. Default: cds"
+            )
+    parser.set_defaults( retry = False,
+            seq_type = 'cds'
+            )
     
     args = parser.parse_args()
 

@@ -11,7 +11,7 @@ modified by stanley fujimoto (masakistan)
 4 mar 2016
 '''
 
-import sys, argparse, datetime, time, re, pickle
+import sys, argparse, datetime, time, re, pickle, copy
 import numpy as np
 from sklearn.utils import shuffle
 from keras.engine.topology import Layer
@@ -20,6 +20,7 @@ from keras.layers import Lambda, Input, merge, TimeDistributed, Dense, Embedding
 from keras.layers import LSTM, GRU
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
+import pandas as pd
 
 sys.setrecursionlimit(10000)
 
@@ -44,16 +45,43 @@ codon_to_aa = {
     "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"
     }
 
+# this is the list of all possible amino acids
+all_aas = [
+        'A',
+        'B',
+        'C',
+        'D',
+        'E',
+        'F',
+        'G',
+        'H',
+        'I',
+        'J',
+        'K',
+        'L',
+        'M',
+        'N',
+        'O',
+        'P',
+        'Q',
+        'R',
+        'S',
+        'T',
+        'U',
+        'V',
+        'W',
+        'X',
+        'Y',
+        'Z',
+        '*'
+        ]
 
-# Function courtesy of: https://github.com/fchollet/keras/pull/1674
-def reverse_func( x ):
-    import keras.backend as K
-    assert K.ndim(x) == 3, "Should be a 3D tensor."
-    rev = K.permute_dimensions(x, (1, 0, 2))[::-1]
-    return K.permute_dimensions(rev, (1, 0, 2))
+all_codons = list( sorted( codon_to_aa.keys() ) )
 
-reverse = Lambda( reverse_func ) # Add this layer after your go backwards LSTM
-
+def print_full(x):
+    pd.set_option('display.max_rows', len(x))
+    print(x)
+    pd.reset_option('display.max_rows')
 
 class BrnnAlign( Layer ):
     #def __init__(self, func, *args, **kwargs):
@@ -291,7 +319,8 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
     model.compile(
             loss = "categorical_crossentropy",
             optimizer = "adam",
-            metrics = [ "categorical_accuracy" ]
+            metrics = [ "categorical_accuracy" ],
+            sample_weight_mode = 'temporal',
             )
     errw( "Done!\n" )
 
@@ -299,12 +328,15 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
 
 
 # Take the constructed model and train it using the data provided
-def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix, idx_to_codon, no_save ):
+def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity, model_save_prefix, idx_to_codon, no_save, save_confusion_matrix ):
     #print train_x[ 0 ][ 0 ]
     #print train_y[ 0 ][ 0 ]
     #print "train_x shape:", train_x.shape
     #print "train_y shape:", train_y.shape
-    
+
+    x_sample_weight = np.array( train_x )
+    x_sample_weight[ x_sample_weight > 0 ] = 1
+
     # train the model
     errw("Training...\n")
     
@@ -320,7 +352,8 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
                 nb_epoch = 1,
                 verbose = verbosity,
                 validation_data = ( validate_x, validate_y ),
-                batch_size = 32
+                batch_size = 32,
+                sample_weight = x_sample_weight
                 )
         
         # I made sure to validate that categorical_accuracy works with masking, it does!
@@ -329,9 +362,16 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
 
         predictions = model.predict( validate_x )
 
-        accuracy = calc_category_accuracy( predictions, validate_y, idx_to_codon )
-        errw( "\t\taa acc: \t" + str( accuracy[ 0 ] ) + "\n" )
-        errw( "\t\tcds acc:\t" + str( accuracy[ 1 ] ) + "\n" )
+        aa_acc, codon_acc, aa_cf, codon_cf = calc_category_accuracy( predictions, validate_y, idx_to_codon )
+        errw( "\n\t\taccuracy metrics:\n" )
+        errw( "\t\t\taa acc: \t" + str( aa_acc ) + "\n" )
+        errw( "\t\t\tcds acc:\t" + str( codon_acc ) + "\n" )
+
+        # print confusion matrices to disk
+
+        if save_confusion_matrix:
+            aa_cf.to_csv( model_save_prefix + ".aa_cf." + str( i ) + ".csv" )
+            codon_cf.to_csv( model_save_prefix + ".codon_cf." + str( i ) + ".csv" )
 
         # Save the model
         if not no_save:
@@ -344,12 +384,31 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
         errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
 
 
+# returns:
+#   - amino acid accuracy
+#   - codon accuracy
+#   - amino acid confusion matrix
+#   - codon confusion matrix
 def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
     counter = 0
     cor_cds = 0
     err_cds = 0
     cor_aa = 0
     err_aa = 0
+
+    # confusion matrices
+    ## first key is the correct value while the second key is the incorrectly predicted value
+    ## amino acid confusion matrix
+    #inner_aa_cf = { item : 0 for item in all_aas }
+    #aa_cf = { item : copy.deepcopy( inner_aa_cf ) for item in all_aas }
+    aa_cf = pd.DataFrame( index = all_aas, columns = all_aas )
+    aa_cf.fillna( value = 0, inplace = True )
+
+    ## codon confusion matrix
+    #inner_codon_cf = { item : 0 for item in all_codons }
+    #codon_cf = { item : copy.deepcopy( inner_codon_cf ) for item in all_codons }
+    codon_cf = pd.DataFrame( index = all_codons, columns = all_codons )
+    codon_cf.fillna( value = 0, inplace = True )
 
     for seq_predictions, seq_labels in zip( all_predictions, all_labels ):
         for pred_val, true_val in zip( seq_predictions, seq_labels ):
@@ -359,26 +418,32 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
             if true_lab == 0:
                 break
 
-            if true_lab == pred_lab:
-                cor_cds += 1
-            else:
-                err_cds += 1
-            
             # fix this to account for the amino acid U
             true_codon = idx_to_codon[ true_lab ]
             pred_codon = idx_to_codon[ pred_lab ]
+            true_aa = codon_to_aa[ true_codon ]
+            pred_aa = codon_to_aa[ pred_codon ]
 
-            if codon_to_aa[ true_codon ] == codon_to_aa[ pred_codon ]:
+            if true_codon == pred_codon:
+                cor_cds += 1
+            else:
+                err_cds += 1
+                #codon_cf[ true_lab ][ pred_lab ] += 1
+                codon_cf[ true_codon ].loc[ pred_codon ] += 1
+
+            if true_aa == pred_aa:
                 cor_aa += 1
             else:
                 err_aa += 1
+                #aa_cf[ true_codon ][ pred_codon ] += 1
+                aa_cf[ true_aa ].loc[ pred_aa ] += 1
            
             counter += 1
 
     # this will return the following values to measure accuracy:
     # ( amino acid accuracy, codon accuracy )
-    return ( float( cor_aa ) / ( cor_aa + err_aa ), float( cor_cds ) / ( cor_cds + err_cds ) )
-       
+    return float( cor_aa ) / ( cor_aa + err_aa ), float( cor_cds ) / ( cor_cds + err_cds ), aa_cf, codon_cf
+
 
 def get_accuracy( outputs, labels, idx_to_codon ):
     gen_seqs = []
@@ -623,7 +688,7 @@ def main( args ):
     #print cds_seqs
 
     # train the model
-    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index, args.no_save )
+    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index, args.no_save, args.save_confusion_matrix )
 
     # run model on test dataset and print accuracy
     #test_model( model, args.model_save_path, cds_reverse_index, test_x, test_y, args.print_test_seqs )
@@ -763,7 +828,12 @@ if __name__ == "__main__":
             type = str,
             help = "Use one-shot learning, add identifier to the trained model so the pre-trained model is preserved and the fine-tuned model is saved to a new location."
             )
+    parser.add_argument( '--save_confusion_matrix',
+            action = 'store_true',
+            help = 'Save the confusion matrices for both codons and amino acids.'
+            )
     parser.set_defaults(
+            save_confusion_matrix = False,
             hidden_layers = 1,
             embedding_nodes = 128,
             lstm_nodes = 128,
