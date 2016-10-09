@@ -21,6 +21,7 @@ from keras.layers import LSTM, GRU
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
 import pandas as pd
+from Bio.Seq import Seq
 
 sys.setrecursionlimit(10000)
 
@@ -44,6 +45,8 @@ codon_to_aa = {
     "GAT":"D", "GAC":"D", "GAA":"E", "GAG":"E",
     "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"
     }
+
+
 
 # this is the list of all possible amino acids
 all_aas = [
@@ -152,7 +155,7 @@ def load_data( amino_acid_path, codons_path, seq_len_cutoff ):
     sys.stderr.write( "\tLoading amino acid file..." )
     aa_raw_text = read_raw_text( amino_acid_path )
     #amino_acids_vocab = unique_words( aa_raw_text )
-    amino_acids_vocab = set( codon_to_aa.values() )
+    amino_acids_vocab = set( all_aas )
     aa_index = word_to_number( amino_acids_vocab )
     aa_seqs = parse_seqs( aa_raw_text, seq_len_cutoff )
     sys.stderr.write( "Done!\n" )
