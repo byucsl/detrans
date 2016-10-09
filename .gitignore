@@ -1,6 +1,11 @@
 data/e_coli
+data/e_coli_ncbi
 networks/*.json
 networks/*.h5
 networks/*.txt
 networks/*.p
 networks/test/*
+test/*
+logs/*
+run_data/*
+trained/*
