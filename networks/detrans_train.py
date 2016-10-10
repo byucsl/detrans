@@ -21,32 +21,34 @@ from keras.layers import LSTM, GRU
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
 import pandas as pd
-from Bio.Seq import Seq
+from Bio.Seq import translate
+from Bio.Seq import CodonTable
 
 sys.setrecursionlimit(10000)
 
 # Global variables
 version = "0.1a"
-codon_to_aa = {
-    "TTT":"F", "TTC":"F", "TTA":"L", "TTG":"L",
-    "TCT":"S", "TCC":"S", "TCA":"S", "TCG":"S",
-    "TAT":"Y", "TAC":"Y", "TAA":"*", "TAG":"*",
-    "TGT":"C", "TGC":"C", "TGA":"*", "TGG":"W",
-    "CTT":"L", "CTC":"L", "CTA":"L", "CTG":"L",
-    "CCT":"P", "CCC":"P", "CCA":"P", "CCG":"P",
-    "CAT":"H", "CAC":"H", "CAA":"Q", "CAG":"Q",
-    "CGT":"R", "CGC":"R", "CGA":"R", "CGG":"R",
-    "ATT":"I", "ATC":"I", "ATA":"I", "ATG":"M",
-    "ACT":"T", "ACC":"T", "ACA":"T", "ACG":"T",
-    "AAT":"N", "AAC":"N", "AAA":"K", "AAG":"K",
-    "AGT":"S", "AGC":"S", "AGA":"R", "AGG":"R",
-    "GTT":"V", "GTC":"V", "GTA":"V", "GTG":"V",
-    "GCT":"A", "GCC":"A", "GCA":"A", "GCG":"A",
-    "GAT":"D", "GAC":"D", "GAA":"E", "GAG":"E",
-    "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"
-    }
 
+all_codons = [
+                'AAA', 'AAC', 'AAT', 'AAG',
+                'ACA', 'ACC', 'ACT', 'ACG',
+                'ATA', 'ATC', 'ATT', 'ATG',
+                'AGA', 'AGC', 'AGT', 'AGG',
+                'CAA', 'CAC', 'CAT', 'CAG',
+                'CCA', 'CCC', 'CCT', 'CCG',
+                'CTA', 'CTC', 'CTT', 'CTG',
+                'CGA', 'CGC', 'CGT', 'CGG',
+                'TAA', 'TAC', 'TAT', 'TAG',
+                'TCA', 'TCC', 'TCT', 'TCG',
+                'TTA', 'TTC', 'TTT', 'TTG',
+                'TGA', 'TGC', 'TGT', 'TGG',
+                'GAA', 'GAC', 'GAT', 'GAG',
+                'GCA', 'GCC', 'GCT', 'GCG',
+                'GTA', 'GTC', 'GTT', 'GTG',
+                'GGA', 'GGC', 'GGT', 'GGG'
+            ]
 
+bacterial_codon_table = CodonTable.unambiguous_dna_by_id[ 11 ]
 
 # this is the list of all possible amino acids
 all_aas = [
@@ -79,7 +81,7 @@ all_aas = [
         '*'
         ]
 
-all_codons = list( sorted( codon_to_aa.keys() ) )
+all_codons = list( sorted( all_codons ) )
 
 def print_full(x):
     pd.set_option('display.max_rows', len(x))
@@ -163,7 +165,7 @@ def load_data( amino_acid_path, codons_path, seq_len_cutoff ):
     sys.stderr.write( "\tLoading codon file..." )
     cds_raw_text = read_raw_text( codons_path )
     #codons_vocab = unique_words( cds_raw_text )
-    codons_vocab = set( codon_to_aa.keys() )
+    codons_vocab = set( all_codons )
     cds_index = word_to_number( codons_vocab )
     cds_seqs = parse_seqs( cds_raw_text, seq_len_cutoff )
     sys.stderr.write( "Done!\n" )
@@ -414,6 +416,12 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
     codon_cf.fillna( value = 0, inplace = True )
 
     for seq_predictions, seq_labels in zip( all_predictions, all_labels ):
+        # first form CDS
+        # then translate, then count
+
+        pred_cds = ""
+        true_cds = ""
+
         for pred_val, true_val in zip( seq_predictions, seq_labels ):
             pred_lab = np.argmax( pred_val )
             true_lab = np.argmax( true_val )
@@ -424,8 +432,12 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
             # fix this to account for the amino acid U
             true_codon = idx_to_codon[ true_lab ]
             pred_codon = idx_to_codon[ pred_lab ]
-            true_aa = codon_to_aa[ true_codon ]
-            pred_aa = codon_to_aa[ pred_codon ]
+
+            true_cds += true_codon
+            pred_cds += pred_codon
+
+            #true_aa = codon_to_aa[ true_codon ]
+            #pred_aa = codon_to_aa[ pred_codon ]
 
             if true_codon == pred_codon:
                 cor_cds += 1
@@ -434,6 +446,10 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
                 #codon_cf[ true_lab ][ pred_lab ] += 1
                 codon_cf[ true_codon ].loc[ pred_codon ] += 1
 
+        true_aas = translate( true_cds, table = 11, cds = True )
+        pred_aas = translate( pred_cds, table = 11, cds = True )
+
+        for trua_aa, pred_aa in zip( true_aas, pred_aas ):
             if true_aa == pred_aa:
                 cor_aa += 1
             else:
