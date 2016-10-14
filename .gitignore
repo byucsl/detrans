@@ -9,3 +9,4 @@ test/*
 logs/*
 run_data/*
 trained/*
+model.*

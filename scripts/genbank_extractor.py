@@ -50,6 +50,9 @@ def main( args ):
 
                         if not re.match( '^[ACGT]+$', nuc ):
                             continue
+                        if len( nuc ) % 3 != 0:
+                            continue
+
                         printed_seqs += 1
                         cds_out.write( ">" + name + "\n" )
                         cds_out.write( nuc + "\n" )

@@ -344,13 +344,13 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
 
     # train the model
     errw("Training...\n")
-    
+
     validate_y_labels = np.argmax( validate_y, axis = 1 )
 
     for i in range( nb_epochs ):
         if verbosity > 0:
             errw( "\tTraining epoch: " + str( i + 1 ) + "/" + str( nb_epochs ) + "\n" )
-        
+
         model.fit(
                 train_x,
                 train_y,
@@ -360,14 +360,14 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
                 batch_size = 32,
                 sample_weight = x_sample_weight
                 )
-        
+
         # I made sure to validate that categorical_accuracy works with masking, it does!
         # So, we don't need custom categorical accuracy calculation code.
         # TODO: Show amino acid codon prediction accuracy, even if the specific codon chosen is incorrect
 
         predictions = model.predict( validate_x )
 
-        aa_acc, codon_acc, aa_cf, codon_cf = calc_category_accuracy( predictions, validate_y, idx_to_codon )
+        aa_acc, codon_acc, aa_cf, codon_cf = calc_category_accuracy( predictions, validate_y, idx_to_codon, i, model_save_prefix )
         errw( "\n\t\taccuracy metrics:\n" )
         errw( "\t\t\taa acc: \t" + str( aa_acc ) + "\n" )
         errw( "\t\t\tcds acc:\t" + str( codon_acc ) + "\n" )
@@ -394,7 +394,7 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
 #   - codon accuracy
 #   - amino acid confusion matrix
 #   - codon confusion matrix
-def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
+def calc_category_accuracy( all_predictions, all_labels, idx_to_codon, epoch_counter, model_save_prefix ):
     counter = 0
     cor_cds = 0
     err_cds = 0
@@ -415,12 +415,18 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
     codon_cf = pd.DataFrame( index = all_codons, columns = all_codons )
     codon_cf.fillna( value = 0, inplace = True )
 
+    aas_out = open( model_save_prefix + "." + str( epoch_counter ) + ".aas_test", 'w' )
+    cds_out = open( model_save_prefix + "." + str( epoch_counter ) + ".cds_test", 'w' )
+
     for seq_predictions, seq_labels in zip( all_predictions, all_labels ):
         # first form CDS
         # then translate, then count
-
-        pred_cds = ""
-        true_cds = ""
+        # we have to translate the predicted sequence because it might output an invalid sequence
+        # and biopython does not like that.
+        pred_cds = []
+        true_cds = []
+        pos = 0
+        count = []
 
         for pred_val, true_val in zip( seq_predictions, seq_labels ):
             pred_lab = np.argmax( pred_val )
@@ -433,31 +439,53 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon ):
             true_codon = idx_to_codon[ true_lab ]
             pred_codon = idx_to_codon[ pred_lab ]
 
-            true_cds += true_codon
-            pred_cds += pred_codon
+            true_cds.append( true_codon )
+            pred_cds.append( pred_codon )
 
             #true_aa = codon_to_aa[ true_codon ]
             #pred_aa = codon_to_aa[ pred_codon ]
 
             if true_codon == pred_codon:
                 cor_cds += 1
+                count.append( 0 )
             else:
                 err_cds += 1
+                count.append( 1 )
                 #codon_cf[ true_lab ][ pred_lab ] += 1
                 codon_cf[ true_codon ].loc[ pred_codon ] += 1
+        true_cds = "".join( true_cds )
+        pred_aas = translate( "".join( pred_cds ), table = 11 )
 
-        true_aas = translate( true_cds, table = 11, cds = True )
-        pred_aas = translate( pred_cds, table = 11, cds = True )
+        cds_out.write( ">" + str( counter ) + "\n" )
+        cds_out.write( "  ".join( map( str, count ) ) + "\n" )
+        cds_out.write( "".join( true_cds ) + "\n" )
+        cds_out.write( "".join( pred_cds ) + "\n" )
 
-        for trua_aa, pred_aa in zip( true_aas, pred_aas ):
+        try:
+            true_aas = translate( true_cds, table = 11, cds = True ) + "*"
+        except:
+            true_aas = translate( true_cds, table = 11 )
+
+        aas_out.write( ">" + str( counter ) + "\n" )
+        aas_out.write( "".join( map( str, count ) ) + "\n" )
+        aas_out.write( true_aas + "\n" )
+        aas_out.write( pred_aas + "\n" )
+
+        for true_aa, pred_aa, count_me in zip( true_aas, pred_aas, count ):
+            if count_me == 0:
+                cor_aa += 1
+                continue
+
             if true_aa == pred_aa:
                 cor_aa += 1
             else:
                 err_aa += 1
                 #aa_cf[ true_codon ][ pred_codon ] += 1
                 aa_cf[ true_aa ].loc[ pred_aa ] += 1
-           
-            counter += 1
+
+        counter += 1
+    aas_out.close()
+    cds_out.close()
 
     # this will return the following values to measure accuracy:
     # ( amino acid accuracy, codon accuracy )
