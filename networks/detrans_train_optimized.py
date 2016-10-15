@@ -287,7 +287,9 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                 Bidirectional(
                     LSTM(
                         nb_lstm_nodes,
-                        return_sequences = True
+                        return_sequences = True,
+                        dropout_W = drop_w,
+                        dropout_U = drop_u
                         )
                     )
                 )

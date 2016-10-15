@@ -283,21 +283,29 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
         if i == 0:
             rnn_fwd = LSTM(
                     nb_lstm_nodes,
-                    return_sequences = True
+                    return_sequences = True,
+                    dropout_W = drop_w,
+                    dropout_U = drop_u
                     )( embedding )
             rnn_bwd = LSTM(
                     nb_lstm_nodes,
                     return_sequences = True,
-                    go_backwards = True
+                    go_backwards = True,
+                    dropout_W = drop_w,
+                    dropout_U = drop_u
                     )( embedding )
         else:
             rnn_fwd = LSTM(
                     nb_lstm_nodes,
-                    return_sequences = True
+                    return_sequences = True,
+                    dropout_W = drop_w,
+                    dropout_U = drop_u
                     )( rnn_fwd )
             rnn_bwd = LSTM(
                     nb_lstm_nodes,
-                    return_sequences = True
+                    return_sequences = True,
+                    dropout_W = drop_w,
+                    dropout_U = drop_u
                     )( rnn_bwd )
     
     errw( "\tAdding reverse layer..." )
