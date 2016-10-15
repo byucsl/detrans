@@ -283,6 +283,12 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
     errw( "\tAdding " + str( nb_layers ) + " recurrent layers...\n" )
     for i in range( nb_layers ):
         errw( "\t\tAdding layer " + str( i + 1 ) + "..." )
+
+        if i == 0:
+            merge_mode = "concat"
+        else:
+            merge_mode = "mul"
+
         model.add(
                 Bidirectional(
                     LSTM(
@@ -290,7 +296,8 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                         return_sequences = True,
                         dropout_W = drop_w,
                         dropout_U = drop_u
-                        )
+                        ),
+                    merge_mode = merge_mode
                     )
                 )
         errw( "Done!\n" )
