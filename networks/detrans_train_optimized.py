@@ -20,6 +20,7 @@ from keras.layers import Lambda, Input, merge, TimeDistributed, Dense, Embedding
 from keras.layers import LSTM, GRU, Bidirectional
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
+from keras.utils.layer_utils import layer_from_config
 import pandas as pd
 from Bio.Seq import translate
 from Bio.Seq import CodonTable
@@ -208,31 +209,51 @@ def split_train_test_validate( split_vals, aa_seqs, cds_seqs ):
 # for training
 def freeze_network( model ):
     errw( "\tFreezing weights..." )
-    for name, node in model.nodes.iteritems():
-        if name != "classification":
-            node.trainable = False
 
-            if "forwards" in name or "backwards" in name:
-                node.dropout_W = 0.0
-                node.dropout_U = 0.0
+    # freeze all but the last layer
+    for layer in model.layers[ : -1 ]:
+        layer.trainable = False
 
     errw( "Done!\n" )
 
 
-def reset_weights( model, nodes_to_reset ):
+def reset_weights( model ):
     errw( "\tResetting layer weights for one-shot learning..." )
 
-    for name, node in model.nodes.iteritems():
-        if name in nodes_to_reset:
-            node.build()
+    output_shape = model.layers[ -1 ].output_shape[ -1 ]
 
+    errw( "\t\tRemoving old classification layer..." )
+    #model.layers.pop()
+    #model.layers[ -1 ].outbound_nodes = []
+    #model.outputs = [ model.layers[ -1 ].output ]
+    #model.built = False
+    errw( "Done!\n" )
+
+    errw( "\t\tAdding new dense layer..." )
+    #model.add(
+    #        TimeDistributed(
+    #            Dense(
+    #                output_shape,
+    #                activation = "softmax"
+    #                )
+    #            )
+    #        )
+    errw( "Done!\n" )
+
+    errw( "\t\tRecompiling model..." )
+    model.compile(
+            loss = "categorical_crossentropy",
+            optimizer = "adam",
+            metrics = [ "categorical_accuracy" ],
+            sample_weight_mode = 'temporal',
+            )
     errw( "Done!\n" )
 
 
 # load a model from disk
 def load_model( model_path, one_shot ):
     errw( "Loading model with prefix: " + model_path + "\n" )
-    
+
     errw( "\tLoading model architecture..." )
     # read the model architecture from the json file
     model_arch = open( model_path + ".json" ).read()
@@ -242,16 +263,15 @@ def load_model( model_path, one_shot ):
     if args.one_shot:
         # change parameters so that certain layers are not trained.
         freeze_network( model )
-    
+
     errw( "\tLoading model weights..." )
     model.load_weights( model_path + ".h5" )
     errw( "Done!\n" )
 
     if args.one_shot:
         # reset the weights of the last layer
-        nodes_to_reset = [ "classification" ]
-        reset_weights( model, nodes_to_reset )
-    
+        reset_weights( model )
+
     errw( "\tLoading amino acid index..." )
     aa_index = pickle.load( open( model_path + ".aa_index.p", "rb" ) )
     errw( "Done!\n" )
@@ -279,7 +299,7 @@ def build_model( nb_layers, nb_embedding_nodes, nb_lstm_nodes, aa_vocab_size, cd
                 aa_vocab_size, nb_embedding_nodes, mask_zero = True )
             )
     errw( "Done!\n" )
-    
+
     errw( "\tAdding " + str( nb_layers ) + " recurrent layers...\n" )
     for i in range( nb_layers ):
         errw( "\t\tAdding layer " + str( i + 1 ) + "..." )
