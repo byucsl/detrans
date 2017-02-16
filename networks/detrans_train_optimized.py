@@ -13,6 +13,13 @@ modified by stanley fujimoto (masakistan)
 
 import sys, argparse, datetime, time, re, pickle, copy
 import numpy as np
+
+# network fine tuning requires setting the numpy random seed before any keras imports.
+np.random.seed( 1337 )
+
+import pandas as pd
+from Bio.Seq import translate
+from Bio.Seq import CodonTable
 from sklearn.utils import shuffle
 from keras.engine.topology import Layer
 from keras.models import model_from_json, Model, Sequential
@@ -21,9 +28,7 @@ from keras.layers import LSTM, GRU, Bidirectional
 from keras.preprocessing.sequence import pad_sequences
 from keras.preprocessing.text import one_hot, text_to_word_sequence
 from keras.utils.layer_utils import layer_from_config
-import pandas as pd
-from Bio.Seq import translate
-from Bio.Seq import CodonTable
+
 
 sys.setrecursionlimit(10000)
 
@@ -83,6 +88,12 @@ all_aas = [
         ]
 
 all_codons = list( sorted( all_codons ) )
+
+
+# Shorthand way to print to standard error
+def errw( string ):
+    sys.stderr.write( string )
+
 
 def print_full(x):
     pd.set_option('display.max_rows', len(x))
@@ -154,7 +165,7 @@ def seqs_to_one_hot( maxlen, seqs, index ):
 
 def load_data( amino_acid_path, codons_path, seq_len_cutoff ):
     sys.stderr.write( "\nLoading data\n" )
-    
+
     sys.stderr.write( "\tLoading amino acid file..." )
     aa_raw_text = read_raw_text( amino_acid_path )
     #amino_acids_vocab = unique_words( aa_raw_text )
@@ -221,15 +232,24 @@ def reset_weights( model ):
     errw( "\tResetting layer weights for one-shot learning..." )
 
     output_shape = model.layers[ -1 ].output_shape[ -1 ]
+    #print "\n"
+    #for i in model.layers:
+    #    print i.name
+    #print "*" * 20
 
-    errw( "\t\tRemoving old classification layer..." )
+    #errw( "\t\tRemoving old classification layer..." )
     #model.layers.pop()
     #model.layers[ -1 ].outbound_nodes = []
     #model.outputs = [ model.layers[ -1 ].output ]
-    #model.built = False
-    errw( "Done!\n" )
+    ##model.built = False
+    #errw( "Done!\n" )
 
-    errw( "\t\tAdding new dense layer..." )
+    #print "\n"
+    #for i in model.layers:
+    #    print i.name
+    #print "*" * 20
+
+    #errw( "\t\tAdding new dense layer..." )
     #model.add(
     #        TimeDistributed(
     #            Dense(
@@ -238,7 +258,7 @@ def reset_weights( model ):
     #                )
     #            )
     #        )
-    errw( "Done!\n" )
+    #errw( "Done!\n" )
 
     errw( "\t\tRecompiling model..." )
     model.compile(
@@ -251,7 +271,7 @@ def reset_weights( model ):
 
 
 # load a model from disk
-def load_model( model_path, one_shot ):
+def load_model( model_path, fine_tune ):
     errw( "Loading model with prefix: " + model_path + "\n" )
 
     errw( "\tLoading model architecture..." )
@@ -260,7 +280,7 @@ def load_model( model_path, one_shot ):
     model = model_from_json( model_arch )
     errw( "Done!\n" )
 
-    if args.one_shot:
+    if args.fine_tune:
         # change parameters so that certain layers are not trained.
         freeze_network( model )
 
@@ -268,9 +288,19 @@ def load_model( model_path, one_shot ):
     model.load_weights( model_path + ".h5" )
     errw( "Done!\n" )
 
-    if args.one_shot:
+    # print original classifier weights
+    #print model.layers[ 0 ].get_weights()
+    #print model.layers[ -1 ].get_weights()
+    #print "*" * 20
+
+    if args.fine_tune:
         # reset the weights of the last layer
         reset_weights( model )
+
+    # check if we really reset the weights
+    #print model.layers[ 0 ].get_weights()
+    #print model.layers[ -1 ].get_weights()
+    #print "*" * 20
 
     errw( "\tLoading amino acid index..." )
     aa_index = pickle.load( open( model_path + ".aa_index.p", "rb" ) )
@@ -370,15 +400,16 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
         # it will look not only at codon accuracy but amino acid accuracy as well
         # this should save time as well because we're not calculating the the labels for
         # the validations set twice
-        model.fit(
-                train_x,
-                train_y,
-                nb_epoch = 1,
-                verbose = verbosity,
-                #validation_data = ( validate_x, validate_y ),
-                batch_size = 32,
-                sample_weight = x_sample_weight
-                )
+        # TODO: uncomment this after testing
+        #model.fit(
+        #        train_x,
+        #        train_y,
+        #        nb_epoch = 1,
+        #        verbose = verbosity,
+        #        #validation_data = ( validate_x, validate_y ),
+        #        batch_size = 32,
+        #        sample_weight = x_sample_weight
+        #        )
 
         predictions = model.predict( validate_x )
 
@@ -402,6 +433,9 @@ def train( model, train_x, train_y, validate_x, validate_y, nb_epochs, verbosity
             errw( "Done!\n" )
 
         errw( "\t\tepoch finished at: " + str( datetime.datetime.now() ) + "\n" )
+    #print model.layers[ 0 ].get_weights()
+    #print "*" * 20
+    #print model.layers[ -1 ].get_weights()
 
 
 # returns:
@@ -427,7 +461,7 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon, epoch_cou
     ## codon confusion matrix
     #inner_codon_cf = { item : 0 for item in all_codons }
     #codon_cf = { item : copy.deepcopy( inner_codon_cf ) for item in all_codons }
-    codon_cf = pd.DataFrame( index = all_codons, columns = all_codons )
+    codon_cf = pd.DataFrame( index = all_codons + [ '' ], columns = all_codons + [ '' ] )
     codon_cf.fillna( value = 0, inplace = True )
 
     aas_out = open( model_save_prefix + "." + str( epoch_counter ) + ".aas_test", 'w' )
@@ -446,7 +480,7 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon, epoch_cou
         for pred_val, true_val in zip( seq_predictions, seq_labels ):
             pred_lab = np.argmax( pred_val )
             true_lab = np.argmax( true_val )
-    
+
             if true_lab == 0:
                 break
 
@@ -481,22 +515,27 @@ def calc_category_accuracy( all_predictions, all_labels, idx_to_codon, epoch_cou
         except:
             true_aas = translate( true_cds, table = 11 )
 
-        aas_out.write( ">" + str( counter ) + "\n" )
-        aas_out.write( "".join( map( str, count ) ) + "\n" )
-        aas_out.write( true_aas + "\n" )
-        aas_out.write( pred_aas + "\n" )
+        count_aa_mismatch = []
 
         for true_aa, pred_aa, count_me in zip( true_aas, pred_aas, count ):
             if count_me == 0:
+                count_aa_mismatch.append( 0 )
                 cor_aa += 1
                 continue
 
             if true_aa == pred_aa:
+                count_aa_mismatch.append( 0 )
                 cor_aa += 1
             else:
+                count_aa_mismatch.append( 1 )
                 err_aa += 1
                 #aa_cf[ true_codon ][ pred_codon ] += 1
                 aa_cf[ true_aa ].loc[ pred_aa ] += 1
+
+        aas_out.write( ">" + str( counter ) + "\n" )
+        aas_out.write( "".join( map( str, count_aa_mismatch ) ) + "\n" )
+        aas_out.write( true_aas + "\n" )
+        aas_out.write( pred_aas + "\n" )
 
         counter += 1
     aas_out.close()
@@ -544,14 +583,26 @@ def get_accuracy( outputs, labels, idx_to_codon ):
 
 
 # Take a trained model and print out the accuracy on the test set
-def test_model( model, model_save_prefix, idx_to_codon, test_x, test_y, print_test_seqs ):
+def test_model( model, model_save_prefix, idx_to_codon, test_x, test_y, print_test_seqs, save_confusion_matrix ):
     # show accuracy
     # this method doesn't seem to exist for graph models, it does for
     # sequential models though... which is odd
     errw( "Testing model\n" )
-   
+
     errw( "\tClassifying test data set..." )
     # generate predictions
+    predictions = model.predict( test_x )
+    aa_acc, codon_acc, aa_cf, codon_cf = calc_category_accuracy( predictions, test_y, idx_to_codon, "test", model_save_prefix )
+
+    errw( "\n\t\taccuracy metrics:\n" )
+    errw( "\t\t\taa acc: \t" + str( aa_acc ) + "\n" )
+    errw( "\t\t\tcds acc:\t" + str( codon_acc ) + "\n" )
+
+    if save_confusion_matrix:
+        aa_cf.to_csv( model_save_prefix + ".aa_cf." + str( "test" ) + ".csv" )
+        codon_cf.to_csv( model_save_prefix + ".codon_cf." + str( "test" ) + ".csv" )
+
+    ''' commented this out on 20160117 because i'm not sure it actually works anymore
     results = model.predict(
             {
                 "input" : test_x,
@@ -563,12 +614,12 @@ def test_model( model, model_save_prefix, idx_to_codon, test_x, test_y, print_te
 
     errw( "\tComputing accuracy..." )
     outputs = results[ "output" ]
-    
+
     accuracy, gen_seqs, cor_seqs = get_accuracy( outputs, test_y, idx_to_codon )
 
     if print_test_seqs:
         fh = open( "test_dataset" + model_save_prefix +  ".txt", 'w' )
-        
+
         counter = 0
         for i in range( len( gen_seqs ) ):
             fh.write( ">predicted" + str( counter ) + "\n" )
@@ -576,11 +627,11 @@ def test_model( model, model_save_prefix, idx_to_codon, test_x, test_y, print_te
             fh.write( ">correct" + str( counter ) + "\n" )
             fh.write( cor_seqs[ i ] + "\n" )
         counter += 1
-        
-        fh.close()
+
+        fh.close()'''
 
     errw( "Done!\n" )
-    errw( "\tTest set accuracy: " + str( accuracy ) + "\n" )
+    #errw( "\tTest set accuracy: " + str( accuracy ) + "\n" )
 
 
 # TODO: implement
@@ -589,11 +640,6 @@ def test_model( model, model_save_prefix, idx_to_codon, test_x, test_y, print_te
 # fasta format
 def classify( model, file_path ):
     pass
-
-
-# Shorthand way to print to standard error
-def errw( string ):
-    sys.stderr.write( string )
 
 
 def main( args ):
@@ -634,7 +680,7 @@ def main( args ):
 
     if args.print_test_seqs:
         errw( "Printing out the test set sequences after training\n" )
-    
+
     errw( "\tMaximum sequence length for training: " )
     if args.seq_len_cutoff == 0:
         errw( "Full length sequences\n" )
@@ -646,15 +692,15 @@ def main( args ):
         errw( "All\n" )
     else:
         errw( str( args.max_seqs ) + "\n" )
-    
+
     if args.classify:
         errw( "\tClassifying: " + args.clasify + "\n" )
-    
+
     if args.load_model:
         errw( "\tLoading model from: " + args.load_model + "\n" )
         args.model_save_path = args.load_model
-        if args.one_shot:
-            args.model_save_path += "." + args.one_shot
+        if args.fine_tune:
+            args.model_save_path += "." + args.fine_tune
 
     if args.no_save:
         errw( "\tNot saving model architecture and weights\n" )
@@ -664,9 +710,10 @@ def main( args ):
     if args.seed:
         errw( "\tSetting data shuffle random seed to: " + str( args.seed ) + "\n" )
 
-    if args.one_shot:
+    if args.fine_tune:
         errw( "\tPerforming one-shot training.\n" )
-        
+        errw( "\t\tModel will have postfix \"" + args.fine_tune + "\" appended to saved model.\n" )
+
 
     # load data
     aa_index, aa_seqs, cds_index, cds_seqs = load_data( args.amino_acids_path, args.codons_path, args.seq_len_cutoff )
@@ -684,8 +731,8 @@ def main( args ):
     if args.load_model:
 
         # load in parameters and indices
-        model, t_aa_index, t_cds_index = load_model( args.load_model, args.one_shot )
-        
+        model, t_aa_index, t_cds_index = load_model( args.load_model, args.fine_tune )
+
         # Perform a check to make sure the loaded vocabulary from a previous run contains all words for the currently laoded dataset
         if not set( aa_index.keys() ).issubset( set( t_aa_index.keys() ) ) or not set( cds_index.keys() ).issubset( set( t_cds_index.keys() ) ):
             sys.exit( "ERROR: loaded amino acid index does not contain all words in the loaded traning set. Aborting!\n" )
@@ -717,22 +764,22 @@ def main( args ):
         errw( "\tOnly using " + str( args.max_seqs ) + " sequences\n" )
         aa_seqs = aa_seqs[ : args.max_seqs ]
         cds_seqs = cds_seqs[ : args.max_seqs ]
-   
+
     cds_reverse_index = number_to_word( cds_index )
 
     # prepare text for model training
     errw( "Prepare sequences for input into learning algorithms\n" )
-    
+
     errw( "\tConvert amino acid sequences..." )
     aa_seqs = seqs_to_indices( aa_seqs, aa_index )
     errw( "Done!\n" )
-    
+
     errw( "\tPad amino acid sequences..." )
     # our convention for padding is to have padding on the right of the sequence,
     # this is reflected in the seqs_to_one_hot function
     aa_seqs = pad_sequences( aa_seqs, maxlen = max_seq_len, padding = 'post' )
     errw( "Done!\n" )
-    
+
     errw( "\tOne-hot encode codon sequences..." )
     cds_seqs = seqs_to_one_hot( max_seq_len, cds_seqs, cds_index )
     errw( "Done!\n" )
@@ -750,10 +797,12 @@ def main( args ):
     #print cds_seqs
 
     # train the model
-    train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index, args.no_save, args.save_confusion_matrix )
+    if not args.no_train:
+        train( model, train_x, train_y, validate_x, validate_y, args.epochs, args.verbosity, args.model_save_path, cds_reverse_index, args.no_save, args.save_confusion_matrix )
 
     # run model on test dataset and print accuracy
-    #test_model( model, args.model_save_path, cds_reverse_index, test_x, test_y, args.print_test_seqs )
+    if not args.no_test:
+        test_model( model, args.model_save_path, cds_reverse_index, test_x, test_y, args.print_test_seqs, True )
 
     # check if we need to classify another external file
     # classify if we need to and output the results to a file
@@ -772,7 +821,7 @@ def main( args ):
 def print_runtime( start, end ):
     # in seconds
     runtime = int( end - start )
-    
+
     days = runtime / ( 60 * 60 * 24 )
     runtime -= days * ( 60 * 60 * 24 )
 
@@ -781,7 +830,7 @@ def print_runtime( start, end ):
 
     mins = runtime / ( 60 )
     runtime -= mins * 60
-    
+
     secs = runtime
 
     # format strings
@@ -798,12 +847,23 @@ def print_runtime( start, end ):
     secs = "0" * ( 2 - len( secs ) ) + secs
 
     errw( "Total runtime: " + days + ":" + hours + ":" + mins + ":" + secs + "\n" )
-    
 
+
+# we run the main function so that we can figure out if the numpy random seed needs to be set
 if __name__ == "__main__":
     errw( "Command run: " + " ".join( sys.argv ) + "\n" )
     parser = argparse.ArgumentParser(
             description = "Build and train a model for amino acid detranslation."
+            )
+    parser.add_argument( '--no_train',
+            action = 'store_true',
+            default = False,
+            help = 'Turn off training.'
+            )
+    parser.add_argument( '--no_test',
+            action = 'store_true',
+            default = False,
+            help = 'Turn off Testing'
             )
     parser.add_argument( 'amino_acids_path',
             type = str,
@@ -886,9 +946,14 @@ if __name__ == "__main__":
             type = float,
             help = "Float between 0 and 1. Fraction of input units to drop for recurrent connections (Default 0)."
             )
-    parser.add_argument( '--one_shot',
+    parser.add_argument( '--fine_tune',
             type = str,
             help = "Use one-shot learning, add identifier to the trained model so the pre-trained model is preserved and the fine-tuned model is saved to a new location."
+            )
+    parser.add_argument( '--fine_tune_seed',
+            type = int,
+            help = "seed used for resetting the linear classifier",
+            default = None
             )
     parser.add_argument( '--save_confusion_matrix',
             action = 'store_true',
@@ -919,8 +984,8 @@ if __name__ == "__main__":
     # *******************************************
     # argument dependency validation
 
-    ## This is 
-    if args.one_shot and not args.load_model:
+    ## This is
+    if args.fine_tune and not args.load_model:
         sys.exit( "ERROR: one shot learning was specified but no pre-trained model was specified to load.\n\tUse the --load_model flag to specify a pre-trained model.\n\tAborting!\n" )
 
     # end argument dependency validation
@@ -931,10 +996,12 @@ if __name__ == "__main__":
     split_total = sum( map( float, args.training_split.split( ',' ) ) )
     if split_total > 100.1 or split_total < 99.9:
         sys.exit( "ERROR: Dataset split " + args.training_split + " does not sum to 100!\n\tAborting!\n" )
-    
+
     # end argument parameter validation
     # *******************************************
 
     main( args )
+
+
 
 
